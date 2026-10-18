@@ -236,7 +236,7 @@ const RULE_TABLE = [
 const RULES = [
   { day: 1, page: 0, key: 'region', head: '§1 仅限支持地区入境', subs: ['支持：美国  英国  日本  德国  新加坡', '不支持：中国大陆  中国香港  中国澳门'] },
   { day: 2, page: 0, key: 'tz', head: '§2 时区、语言须与 IP 归属一致', subs: RULE_TABLE.map((r) => r.join('|')) },
-  { day: 2, page: 0, key: 'quiz', head: '§3 测谎题对答如流者：拘留', subs: ['（柜台上的『测谎』按钮）'] },
+  { day: 2, page: 0, key: 'quiz', head: '§3 测谎露馅者：拘留', subs: ['有疑点才能测谎（证件矛盾 / 话里的马脚）'] },
   { day: 3, page: 1, key: 'pay', head: '§4 付款、账单、手机须真实', subs: ['禁止：虚拟卡、555 接码手机号', '账单所在州须与 IP 归属一致', '禁止拼车：一本护照只能一个人用'] },
   { day: 4, page: 1, key: 'xray', head: '§5 后台进程须干净', subs: ['禁止“小猫咪”、中文输入法（『X光』）'] },
   { day: 5, page: 1, key: 'corp', head: '§6 中资控股过半：一律禁止', subs: ['无论公司注册在哪（套娃要拆到底）'] },

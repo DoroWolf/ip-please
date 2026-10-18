@@ -140,6 +140,15 @@ const SMS_ISSUE = (phone, ask) => ({
 const ADDR_ISSUE = (ask) => ({
   pairs: [['ac.账单', 'rule.pay'], ['ac.账单', 'dv.归属']], title: '记录比对', sub: '今天第 37 个住在 123 Main St 的旅客', ask, fx: 'pile',
 });
+// 证件干净的伪装者，话里会露出马脚：检查模式下点 Ta 说的话。找到马脚（或证件矛盾）才能测谎
+const TELL = (say, sub, ask) => ({ say, title: '可疑：话里有马脚', sub, ask });
+const RANDOM_TELLS = [
+  ['嗯嗯，yes.', '英文前面带了个“嗯嗯”', [['C', '“嗯嗯”是什么意思？'], ['E', '……Hmm hmm. American hmm.', { expr: 'nervous', sweat: true }]]],
+  ['OK 的。', '“OK 的”是中文说法', [['C', '“OK 的”？'], ['E', '……OK. Just OK.', { expr: 'nervous', sweat: true }]]],
+  ['You can you up.', '中式英语：你行你上', [['C', 'You can you up？'], ['E', '……It is an old American saying.', { expr: 'nervous', sweat: true }]]],
+  ['Good good study.', '中式英语：好好学习', [['C', 'Good good study？'], ['E', '……Day day up.', { expr: 'grin' }]]],
+];
+
 const XRAY_ITEM = { cat: { icon: 'cat', at: [36, 104], label: '小猫咪.exe', key: 'xr.cat' }, keys: { icon: 'keys', at: [-36, 104], label: '搜狗输入法.exe', key: 'xr.keys' } };
 const XRAY_ISSUE = (kind, ask) => ({
   pairs: [[XRAY_ITEM[kind].key], [XRAY_ITEM[kind].key, 'rule.xray']], title: '后台进程',
@@ -238,24 +247,27 @@ function day2Fixed() {
     },
     brown: {
       person: 'BROWN', voice: 120,
-      intro: [['E', 'Good morning, sir.']],
+      intro: [['E', 'Good morning，sir。']],
+      tell: TELL('Good morning，sir。', '英文里夹着全角标点（输入法没切）',
+        [['C', '你的逗号是全角的。'], ['E', '……这是美式逗号。', { expr: 'nervous', sweat: true }]]),
       docs: [
         { key: 'pp', doc: usPassport('BROWN', 'BROWN', 'MICHAEL', '1985.03.12', 'NEW YORK') },
         { key: 'dv', doc: device2('64.233.160.4', '美国 · 纽约', 'America/New_York', 'en-US', 'MacBook') },
       ],
       primary: 'pp', quiz: { first: 0 },
-      ok: ['detain', 'deny'], reason: 'Ta 会接“一百八一杯”', hint: '提示：试试柜台上的『测谎』',
+      ok: ['detain', 'deny'], reason: 'Ta 会接“一百八一杯”', hint: '提示：用『检查』点 Ta 说的话，找马脚',
       issues: [],
     },
     emily: {
       person: 'EMILY', voice: 190,
-      intro: [['E', 'Hi.']],
+      intro: [['E', 'Hi 哈。']],
+      tell: TELL('Hi 哈。', '英文后面跟了个“哈”', [['C', '“哈”是什么？'], ['E', '……Ha! Ha ha.', { expr: 'nervous', sweat: true }]]),
       docs: [
         { key: 'pp', doc: usPassport('EMILY', 'JONES', 'EMILY', '1992.11.02', 'CHICAGO', 'F') },
         { key: 'dv', doc: device2('23.94.12.77', '美国 · 芝加哥', 'America/Chicago', 'en-US', 'iPhone') },
       ],
       primary: 'pp', quiz: { first: 5 },
-      ok: ['detain', 'deny'], reason: 'Ta 坚持豆腐脑是咸的', hint: '提示：试试柜台上的『测谎』',
+      ok: ['detain', 'deny'], reason: 'Ta 坚持豆腐脑是咸的', hint: '提示：用『检查』点 Ta 说的话，找马脚',
       issues: [],
     },
     jorji: {
@@ -356,10 +368,11 @@ function day4Fixed() {
     },
     v50: {
       person: 'V50', voice: 120,
-      intro: [['E', 'Hey!']],
+      intro: [['E', 'Hey! Crazy Thursday!']],
+      tell: TELL('Hey! Crazy Thursday!', '他知道今天是“疯狂星期四”', [['C', '你怎么知道今天是疯狂星期四？'], ['E', '……KFC 是美国的。', { expr: 'grin' }]]),
       docs: usDocs('V50', 'MILLER', 'JAKE'), primary: 'pp',
       quiz: { first: QUIZ_THURSDAY },
-      ok: ['detain', 'deny'], reason: 'Ta 会说“V 我 50”', hint: '提示：今天星期几？问问看',
+      ok: ['detain', 'deny'], reason: 'Ta 会说“V 我 50”', hint: '提示：用『检查』点 Ta 说的话，找马脚',
       issues: [],
     },
     jorji: {
@@ -517,9 +530,12 @@ function randomEntrant(day, kind) {
     spec.reason = 'IP 在中国：只看地区，不看脸';
     spec.react = { deny: [['E', 'Unbelievable.', { expr: 'sad' }]] };
   } else if (kind === 'hidden') {
+    const [say, sub, ask] = pick(RANDOM_TELLS);
+    spec.intro = [['E', say]];
+    spec.tell = TELL(say, sub, ask);
     spec.quiz = 'cn';
     spec.reason = 'Ta 会接测谎题';
-    spec.hint = '提示：试试柜台上的『测谎』';
+    spec.hint = '提示：用『检查』点 Ta 说的话，找马脚';
   } else if (kind === 'virtual') {
     pay = `虚拟卡 ··${digits(4)}`;
     spec.issues.push(VIRTUAL_ISSUE([['C', '这张卡在哪办的？'], nervous(['……网上买的，很方便。', '……朋友给的。', '它很真！'])]));

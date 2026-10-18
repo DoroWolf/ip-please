@@ -51,8 +51,8 @@ function runTimers() {
 }
 
 function say(who, text) {
-  B.lines.push({ t: now, who, text });
   const e = B.ent;
+  B.lines.push({ t: now, who, text, ent: e });
   const pitch = who === 'C' ? 176 : who === 'Q' ? 160 : (e ? e.spec.voice : 125);
   SFX.mumble(text, pitch, B.lines.length * 7 + S.day);
   if (who === 'E' && e) e.talkUntil = now + Math.min(1.3, 0.25 + 0.065 * [...text].length);
@@ -87,7 +87,7 @@ function newEntrant(spec, instant) {
   return {
     spec, tEnter: instant ? now - 1 : now + 0.35, phase: instant ? 'here' : 'enter',
     expr: ASSETS.people[spec.person].expr, talkUntil: 0, sweatT: null, slip: false, busyUntil: 0,
-    decided: null, asked: new Set(), found: new Set(), quizDone: [], docs: [], placed: new Set(), instant,
+    decided: null, asked: new Set(), found: new Set(), quizDone: [], docs: [], placed: new Set(), instant, suspect: false,
   };
 }
 
@@ -192,7 +192,7 @@ function judge(e, dec) {
   if (spec.ok.includes(dec)) {
     B.correct++; S.stats.correct++;
     B.pay += 5;
-    if (dec === 'detain') B.bonus += 5;
+    if (dec === 'detain' && e.exposed) B.bonus += 5;
     return;
   }
   S.stats.wrong++;
@@ -344,6 +344,7 @@ function quiz() {
   const e = B.ent;
   if (!e || e.phase !== 'here' || !e.handed || B.event) return;
   if (now < e.busyUntil) return;
+  if (!e.suspect) { flash('先找到疑点才能测谎：证件矛盾，或者用『检查』点 Ta 说的话'); return; }
   S.tut.quiz = true;
   const q = e.spec.quiz;
   const pool = QUIZ.map((_, i) => i).filter((i) => i !== QUIZ_THURSDAY || S.day === 4);
@@ -389,8 +390,22 @@ function xrayItemBox(e, it) {
 
 function docBox(d) { return [d.x, d.y, d.x + d.doc.w - 1, d.y + d.doc.h - 1]; }
 
+// 对话框（左下角最近三句）的位置，绘制和检查模式共用
+function lineBoxes() {
+  return B.lines.slice(-3).map((ln, i) => {
+    const size = tw(ln.text, 12) > 176 ? 10 : 12;
+    const y = 288 + i * 17;
+    return { ln, size, box: [30, y, 30 + tw(ln.text, size) + 8, y + 15] };
+  });
+}
+
 function fieldAt(x, y) {
   const e = B.ent;
+  if (e && e.handed) {
+    for (const { ln, box } of lineBoxes()) {
+      if (ln.who === 'E' && ln.ent === e && inBox(x, y, box)) return { key: 'say', ln, box: () => box };
+    }
+  }
   if (B.xray.on && e && e.spec.xray && entrantX(e) !== null) {
     for (const it of e.spec.xray) {
       const b = xrayItemBox(e, it);
@@ -435,6 +450,7 @@ function matchIssue(keys) {
 function showIssue(issue) {
   const e = B.ent, I = B.insp;
   I.banner = { title: issue.title, sub: issue.sub, issue, ask: issue.ask && !e.asked.has(issue) && e.phase === 'here', bad: true };
+  e.suspect = true;
   if (issue.all) I.all = true;
   SFX.play('discrepancy', 1, 0.03);
   for (const s of I.sel) if (s.xr) e.found.add(s.key);
@@ -463,6 +479,15 @@ function inspectClick(x, y) {
   if (hit && hit.d && ruleTabHit(hit.d, x, y)) { hit.d.doc.flip(); SFX.paper(2); I.sel = I.sel.filter((s) => s.d !== hit.d); return; }
   if (I.banner) { I.banner = null; I.sel = []; I.all = false; }
   if (!hit || !hit.key) return;
+  if (hit.key === 'say') {            // 点旅客说的话：单独判断有没有马脚
+    I.sel = [hit];
+    SFX.play('select');
+    const tell = B.ent.spec.tell;
+    if (tell && hit.ln.text === tell.say) { S.tut.tell = true; showIssue(tell); }
+    else I.banner = { title: '这句话没什么问题', sub: '换一句听听，或者去查证件', bad: false };
+    return;
+  }
+  if (I.sel.some((s) => s.key === 'say')) I.sel = [];
   const k = I.sel.findIndex((s) => s.key === hit.key);
   if (k >= 0) { I.sel.splice(k, 1); return; }
   I.sel.push(hit);
@@ -657,16 +682,14 @@ function drawBoothLower() {
   rect(x0, y0, x0 + 18, y0 + 16, on ? K.CLAUDE : K.METAL_D);
   outline(x0, y0, x0 + 18, y0 + 16, K.METAL_L);
   for (let yy = y0 + 3; yy < y0 + 15; yy += 3) rect(x0 + 3, yy, x0 + 15, yy, K.INK);
-  B.lines.slice(-3).forEach((ln, i) => {
+  for (const { ln, size, box } of lineBoxes()) {
     const n = Math.max(1, Math.floor((now - ln.t) * 26));
-    const y = 288 + i * 17;
-    const size = tw(ln.text, 12) > 176 ? 10 : 12;
-    const w = tw(ln.text, size) + 8;
-    rect(30, y, 30 + w, y + 15, 'rgb(30,28,26)');
-    outline(30, y, 30 + w, y + 15, 'rgb(76,70,64)');
-    if (ln.who === 'C') rect(30, y, 31, y + 15, K.CLAUDE);
+    const [x0, y] = box;
+    rect(...box, 'rgb(30,28,26)');
+    outline(...box, 'rgb(76,70,64)');
+    if (ln.who === 'C') rect(x0, y, x0 + 1, y + 15, K.CLAUDE);
     txt(35, y + (size === 12 ? 2 : 3), ln.text, size, ln.who === 'C' ? K.CLAUDE_L : K.WHITE, 'la', n);
-  });
+  }
   txt(8, 347, `${DATES[S.day]}  ${WEEKDAYS[S.day]}`, 10, K.GREY);
   const m = 6 * 60 + Math.floor((now - B.clock0) / 1.1);
   txt(210, 346, `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`, 12, K.LED, 'ra');
@@ -675,7 +698,7 @@ function drawBoothLower() {
     const lit = now < (B.detainT || -9) + 0.6;
     rect(...DETAIN_BTN, lit ? K.RED : K.RED_D); outline(...DETAIN_BTN, K.OUTLINE);
     txt(center(DETAIN_BTN)[0], DETAIN_BTN[1] + 2, '拘留', 10, can ? K.WHITE : K.GREY, 'ma');
-    const busy = !can || now < B.ent.busyUntil;
+    const busy = !can || !B.ent.suspect || now < B.ent.busyUntil;
     rect(...QUIZ_BTN, busy ? K.METAL_D : 'rgb(70,80,104)'); outline(...QUIZ_BTN, K.OUTLINE);
     txt(center(QUIZ_BTN)[0], QUIZ_BTN[1] + 2, '测谎', 10, busy ? K.GREY : K.WHITE, 'ma');
   }
@@ -753,7 +776,8 @@ function hintText() {
   if (S.day <= 5 && !B.ruleOpened) return '今天有新规：点右下角『宪法』看看（标着 NEW）';
   if (S.day === 2) {
     if (!T.inspect) return '右下『?』检查模式：点两处矛盾的信息（如国籍和时区）';
-    if (!T.quiz && B.idx >= 3) return '新：柜台上的『测谎』可以提问；露馅的按『拘留』';
+    if (!T.tell && !e.suspect && B.idx >= 3) return '证件都对得上？用『检查』点 Ta 说的话，找马脚';
+    if (!T.quiz && e.suspect && e.spec.quiz) return '有疑点了：可以按柜台上的『测谎』；露馅的按『拘留』';
   }
   if (S.day === 3 && !T.account && B.idx <= 2) return '新：账户卡。可疑的付款/账单/手机号，和宪法 §4 一起点';
   if (S.day === 4 && !T.xray) return '新：右下『X光』扫描口袋；检查模式下可以直接点可疑物品';
@@ -801,6 +825,7 @@ function composeInspect(g) {
     if (d.big) lighten([Math.max(DESK[0], d.x), Math.max(DESK[1], d.y), Math.min(W, d.x + d.doc.w), Math.min(H, d.y + d.doc.h)]);
   }
   if (B.xray.on) lighten([WIN[0], WIN[1], WIN[2] + 1, WIN[3] + 1]);
+  if (B.ent && B.ent.handed) lighten([28, 286, 220, 339]);   // 对话框也亮着，方便点旅客说的话
   let boxes = I.sel.map((s) => s.box());
   if (I.all && B.ent) {
     boxes = [];
@@ -828,7 +853,7 @@ function composeInspect(g) {
       txt(center(ASK_BTN)[0], 145, '询问', 12, K.WHITE, 'ma');
     }
   } else {
-    const s = I.sel.length ? '再点一处，看看两者是否矛盾' : '检查模式：点选两处信息（证件栏位 / 宪法条文）';
+    const s = I.sel.length ? '再点一处，看看两者是否矛盾' : '检查模式：点两处信息找矛盾，或点旅客说的话找马脚';
     rect(...BANNER_BOX, 'rgba(22,19,19,0.85)'); outline(...BANNER_BOX, K.GREY_D);
     txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 12, s, 10, K.GREY);
   }
