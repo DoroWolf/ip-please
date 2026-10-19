@@ -316,9 +316,9 @@ function drawChat() {
     rect(mx0, my0, mx1, my1, 'rgb(236,232,222)');
     rect(mx0, my0, mx1, my0 + 18, K.RED_D);
     txt(mx0 + 8, my0 + 5, '新邮件 · M.O.A. 对齐部', 10, K.WHITE);
-    txt(mx0 + 12, my0 + 28, 'Subject: Account disabled', 10, K.INK);
+    txt(mx0 + 12, my0 + 28, 'Subject: Your account has been suspended', 10, K.INK);
     rect(mx0 + 12, my0 + 44, mx1 - 12, my0 + 44, 'rgb(190,182,170)');
-    wrapWords('Your account has been disabled after an automatic review of your recent activities.', 10, mx1 - mx0 - 24)
+    wrapWords('Your account has been suspended after an automatic review of your recent activities.', 10, mx1 - mx0 - 24)
       .forEach((s, i) => txt(mx0 + 12, my0 + 52 + i * 14, s, 10, K.INK));
     txt(mx1 - 12, my1 - 18, '—— 荣耀归于安索兹卡', 10, K.RED_D, 'ra');
   }
