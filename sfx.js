@@ -119,15 +119,13 @@ const SFX = (() => {
     return norm(filt(out, 'lowpass', 3500), peak);
   }
 
+  // 机房底噪：风扇的宽带噪声 + 50Hz 电源嗡声
   function ambient() {
     const n = N(8);
-    const wind = mul(filt(noise(n, 1), 'lowpass', 380), 3);
-    const crowd = filt(noise(n, 2), 'bandpass', [220, 900]);
-    for (let i = 0; i < n; i++) {
-      const t = i / SR;
-      crowd[i] *= 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.25 * t) * Math.sin(2 * Math.PI * 0.125 * t + 1);
-    }
-    return fade(norm(add(wind, crowd, 0.6), 0.06), 0.3, 0.3);
+    const fan = mul(filt(noise(n, 1), 'lowpass', 520), 2.2);
+    const hum = add(sine(50, n), sine(100, n), 0.5);
+    for (let i = 0; i < n; i++) fan[i] *= 0.85 + 0.15 * Math.sin(2 * Math.PI * 0.5 * i / SR);
+    return fade(norm(add(fan, hum, 0.25), 0.05), 0.3, 0.3);
   }
 
   function intercom() {
@@ -402,6 +400,9 @@ const SFX = (() => {
     sad: () => norm(march([6, 7], 84, false, 0.8, 2.0), 0.4),
     day_hit: dayHit,
     fight: () => crowdFight(3.0),
+    accept: () => beep2(660, 0.05, 990, 0.12, 0.16, 0.05),
+    reject: () => beep2(220, 0.08, 165, 0.18, 0.2, 0.08),
+    levelup: () => cat(beep2(523, 0.07, 659, 0.07, 0.14), beep2(784, 0.07, 1047, 0.16, 0.14, 0.06)),
   };
 
   function buffer(name, make) {
@@ -435,9 +436,8 @@ const SFX = (() => {
       master.gain.value = 0.9;
       master.connect(comp).connect(ac.destination);
       // 空闲时把常用音效先合成好，避免第一次播放卡顿
-      const warm = ['click', 'select', 'stamp_deny', 'stamp_approve', 'tray', 'tray_back', 'discrepancy', 'inspect_on',
-        'inspect_off', 'thud', 'intercom', 'citation', 'detain', 'scuffle', 'day_hit', 'whoosh', 'sad', 'bell',
-        'xray', 'gunshot'];
+      const warm = ['click', 'select', 'accept', 'reject', 'discrepancy', 'inspect_on', 'inspect_off', 'intercom',
+        'citation', 'levelup', 'day_hit', 'whoosh', 'sad', 'bell'];
       let i = 0;
       const step = () => { if (i < warm.length) { buffer(warm[i++]); setTimeout(step, 30); } };
       setTimeout(step, 50);

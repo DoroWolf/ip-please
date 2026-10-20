@@ -6,29 +6,17 @@ const W = 640, H = 360;
 const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-// —— 调色板：灰褐、低饱和；只有红章、绿章、Claude 橙是亮色 ——
+// —— 调色板：近黑的蓝绿底，青色为主色；绿 = 放行，红 = 拦截，琥珀 = 警告，Claude 橙 = 你自己 ——
 const C = {
-  INK: [22, 19, 19], OUTLINE: [34, 27, 25],
-  GROUND: [93, 87, 78], GROUND_D: [80, 74, 67],
-  WALL_D: [48, 45, 43],
-  BOOTH_WALL: [52, 48, 44],
-  COUNTER: [98, 86, 73], COUNTER_L: [124, 110, 93], COUNTER_D: [70, 61, 52],
-  DESK: [68, 57, 50], DESK_D: [56, 47, 42], DESK_L: [84, 72, 63],
-  PAPER: [226, 215, 196], PAPER_D: [200, 187, 167], PAPER_LINE: [216, 204, 184],
-  PINK: [224, 198, 186], PINK_D: [196, 166, 156],
-  SAGE: [208, 214, 190], SAGE_D: [172, 180, 152],
-  XRAY_BG: [18, 40, 42], XRAY_FG: [70, 140, 136], XRAY_L: [150, 220, 210],
-  TEXT: [74, 56, 48], TEXT_L: [128, 106, 92],
-  NAVY: [42, 50, 76], NAVY_L: [60, 70, 100],
-  RED: [180, 46, 40], RED_D: [120, 30, 28], RED_L: [222, 92, 76],
-  GREEN: [84, 128, 70], GREEN_D: [56, 88, 48], GREEN_L: [122, 178, 98],
-  METAL: [92, 90, 86], METAL_D: [60, 58, 56], METAL_L: [124, 122, 116],
-  WHITE: [228, 223, 212], GREY: [150, 145, 136], GREY_D: [100, 94, 88],
-  ORANGE: [220, 150, 70],
+  INK: [6, 10, 13], BG: [9, 15, 19], PANEL: [13, 22, 27], PANEL_L: [19, 32, 38],
+  LINE: [30, 58, 64], LINE_L: [48, 92, 98], GRID: [14, 26, 30],
+  CYAN: [80, 210, 196], CYAN_D: [40, 120, 116], CYAN_L: [160, 240, 228],
+  TEXT: [196, 226, 220], DIM: [96, 130, 128], DIM_D: [58, 82, 82],
+  GREEN: [88, 214, 130], GREEN_D: [28, 84, 52],
+  RED: [255, 92, 92], RED_D: [96, 28, 32],
+  AMBER: [240, 180, 80], AMBER_D: [92, 64, 24],
+  WHITE: [230, 240, 236],
   CLAUDE: [204, 112, 80], CLAUDE_L: [232, 156, 116],
-  LED: [214, 72, 52], SWEAT: [156, 186, 204],
-  BOOK: [92, 64, 50], BOOK_L: [130, 100, 70], GOLD: [190, 160, 100],
-  SKIN: [198, 152, 120],
 };
 const K = {};
 for (const k in C) K[k] = rgb(C[k]);
@@ -57,6 +45,17 @@ function outline(x0, y0, x1, y1, col, w = 1) {
   rect(x1 - w + 1, y0, x1, y1, col);
 }
 
+// 切角边框（电子面板的样子）
+function frame(x0, y0, x1, y1, col, fill = null) {
+  if (fill) { rect(x0 + 1, y0 + 1, x1 - 1, y1 - 1, fill); }
+  rect(x0 + 3, y0, x1 - 3, y0, col); rect(x0 + 3, y1, x1 - 3, y1, col);
+  rect(x0, y0 + 3, x0, y1 - 3, col); rect(x1, y0 + 3, x1, y1 - 3, col);
+  for (let i = 1; i < 3; i++) {
+    pt(x0 + 3 - i, y0 + i, col); pt(x1 - 3 + i, y0 + i, col);
+    pt(x0 + 3 - i, y1 - i, col); pt(x1 - 3 + i, y1 - i, col);
+  }
+}
+
 function pt(x, y, col) { G.fillStyle = col; G.fillRect(x, y, 1, 1); }
 
 function line(x0, y0, x1, y1, col) {
@@ -76,6 +75,22 @@ function line(x0, y0, x1, y1, col) {
   }
 }
 
+// 虚线（数据流）：phase 让它动起来
+function dashLine(x0, y0, x1, y1, col, phase = 0, on = 3, off = 3) {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  G.fillStyle = col;
+  for (let i = 0; i <= n; i++) {
+    if (((i + Math.floor(phase)) % (on + off) + on + off) % (on + off) >= on) continue;
+    G.fillRect(Math.round(lerp(x0, x1, n ? i / n : 0)), Math.round(lerp(y0, y1, n ? i / n : 0)), 1, 1);
+  }
+}
+
+// 扫描线：每隔一行压暗
+function scanlines(x0, y0, x1, y1, alpha = 0.18) {
+  G.fillStyle = `rgba(0,0,0,${alpha})`;
+  for (let y = y0 + 1; y <= y1; y += 2) G.fillRect(x0, y, x1 - x0 + 1, 1);
+}
+
 function pattern(pat, x, y, colors, k = 1) {
   for (let j = 0; j < pat.length; j++) {
     const row = pat[j];
@@ -86,19 +101,6 @@ function pattern(pat, x, y, colors, k = 1) {
   }
 }
 
-const SPARK_13 = [
-  '......X......', '...X..X..X...', '....X.X.X....', '.X...XXX...X.', '..XX.XXX.XX..', '....XXXXX....',
-  'XXXXXXXXXXXXX', '....XXXXX....', '..XX.XXX.XX..', '.X...XXX...X.', '....X.X.X....', '...X..X..X...',
-  '......X......',
-];
-const SPARK_7 = ['...X...', '.X.X.X.', '..XXX..', 'XXXXXXX', '..XXX..', '.X.X.X.', '...X...'];
-
-function spark(cx, cy, col, big = true, k = 1) {
-  const pat = big ? SPARK_13 : SPARK_7;
-  const r = Math.floor(pat.length / 2) * k;
-  pattern(pat, cx - r, cy - r, { X: col }, k);
-}
-
 const CURSOR_PX = [
   'X.........', 'XX........', 'XWX.......', 'XWWX......', 'XWWWX.....', 'XWWWWX....', 'XWWWWWX...',
   'XWWWWWWX..', 'XWWWWWWWX.', 'XWWWWXXXXX', 'XWWXWX....', 'XWX.XWX...', 'XX...XWX..', '......XX..',
@@ -107,19 +109,19 @@ const HAND_PX = [
   '....XX......', '...XWWX.....', '...XWWX.....', '...XWWXXX...', '...XWWXWWXX.', '.XXXWWXWWXWX',
   'XWWXWWWWWXWX', 'XWWWWWWWWWWX', '.XWWWWWWWWWX', '..XWWWWWWWX.', '...XWWWWWX..', '...XXXXXXX..',
 ];
+const CROSS_PX = ['...X...', '...X...', '.......', 'XX.X.XX', '.......', '...X...', '...X...'];
 
 function drawCursor(x, y, mode) {
-  if (mode === 'hand') return pattern(HAND_PX, x - 5, y - 1, { X: K.INK, W: K.WHITE });
-  pattern(CURSOR_PX, x, y, { X: K.INK, W: K.WHITE });
+  if (mode === 'hand') return pattern(HAND_PX, x - 5, y - 1, { X: K.INK, W: K.CYAN_L });
+  if (mode === 'cross') return pattern(CROSS_PX, x - 3, y - 3, { X: K.AMBER });
+  pattern(CURSOR_PX, x, y, { X: K.INK, W: K.CYAN_L });
 }
 
 // —— 像素字：字形图集（白字），按 (字号, 颜色, 字符串) 缓存上好色的小画布 ——
-let FONT_IMG = null, ATLAS_IMG = null, BG_IMG = null, WIN_IMG = null;
+let FONT_IMG = null, ATLAS_IMG = null;
 const FM = window.ASSETS.font;
 const PL = 2, PT = 4;
 const textCache = new Map();
-
-function glyph(size, ch) { return FM[size][ch]; }
 
 function tw(s, size = 12) {
   let w = 0;
@@ -151,12 +153,12 @@ function textCanvas(s, size, col) {
   return cv;
 }
 
-// anchor: 'la' 左对齐，'ma' 居中，'ra' 右对齐；y 是字形的视觉顶边
-function txt(x, y, s, size = 12, col = K.WHITE, anchor = 'la', n = null) {
+// anchor: 'la' 左对齐，'ma' 居中，'ra' 右对齐；y 是字形的视觉顶边；n = 只画前 n 个字（打字机）
+function txt(x, y, s, size = 12, col = K.TEXT, anchor = 'la', n = null) {
   s = String(s);
   if (!s) return;
   const c = textCanvas(s, size, col);
-  let w = tw(s, size);
+  const w = tw(s, size);
   if (anchor === 'ma') x = Math.round(x - w / 2);
   else if (anchor === 'ra') x = x - w;
   if (n !== null) {
@@ -182,9 +184,8 @@ function bigText(x, y, s, size, k, col, shadow = null, align = 'center') {
   return [w, size * k];
 }
 
-// 逐字折行（英文按单词折）
+// 逐字折行
 function wrap(s, size, width) {
-  if (LANG === 'en') return s.split('\n').flatMap((p) => wrapWords(p, size, width));
   const lines = [];
   let cur = '';
   for (const ch of s) {
@@ -195,40 +196,20 @@ function wrap(s, size, width) {
   return lines;
 }
 
-function wrapWords(s, size, width) {
-  const lines = [];
-  let cur = '';
-  for (const wd of s.split(' ')) {
-    const cand = (cur + ' ' + wd).trim();
-    if (tw(cand, size) > width && cur) { lines.push(cur); cur = wd; } else cur = cand;
-  }
-  if (cur) lines.push(cur);
-  return lines;
-}
-
 // —— 精灵 ——
 const SPR = window.ASSETS.sprites;
 
-// 英文模式下有 `key:en` 的（印章、对齐部圆印）自动换成英文版
-const sprite = (key) => (LANG === 'en' && SPR[key + ':en']) || SPR[key];
-
-function spr(key, x, y) {
-  const s = sprite(key);
+function spr(key, x, y, k = 1) {
+  const s = SPR[key];
   if (!s) return false;
-  G.drawImage(ATLAS_IMG, s[0], s[1], s[2], s[3], x + s[4], y + s[5], s[2], s[3]);
+  G.drawImage(ATLAS_IMG, s[0], s[1], s[2], s[3], x + s[4] * k, y + s[5] * k, s[2] * k, s[3] * k);
   return true;
 }
 
-// 整屏背景；英文版再贴上横幅、路牌、宪法书的英文补丁
-function drawBg() {
-  G.drawImage(BG_IMG, 0, 0);
-  if (LANG === 'en') for (let i = 0; SPR['bg:en:' + i]; i++) spr('bg:en:' + i, 0, 0);
-}
-
-// 把一块区域往某个颜色压暗（等同 pp.base.darken）
+// 把一块区域往某个颜色压暗
 function darken(alpha, col = C.INK, box = null) {
   G.fillStyle = rgba(col, alpha);
-  if (box) G.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
+  if (box) G.fillRect(box[0], box[1], box[2] - box[0] + 1, box[3] - box[1] + 1);
   else G.fillRect(0, 0, W, H);
 }
 
@@ -240,9 +221,7 @@ function loadImages() {
     im.src = src;
   });
   const A = window.ASSET_IMAGES;
-  return Promise.all([load(A.font), load(A.atlas), load(A.bg), load(A.win)]).then(([f, a, b, w]) => {
-    FONT_IMG = f; ATLAS_IMG = a; BG_IMG = b; WIN_IMG = w;
-  });
+  return Promise.all([load(A.font), load(A.atlas)]).then(([f, a]) => { FONT_IMG = f; ATLAS_IMG = a; });
 }
 
 // —— 缓动 ——
@@ -251,27 +230,20 @@ const seg = (t, t0, t1) => (t1 > t0 ? clamp((t - t0) / (t1 - t0)) : +(t >= t1));
 const smooth = (u) => u * u * (3 - 2 * u);
 const easeOut = (u) => 1 - (1 - u) ** 3;
 const lerp = (a, b, u) => a + (b - a) * u;
-const lerp2 = (p, q, u) => [Math.round(lerp(p[0], q[0], u)), Math.round(lerp(p[1], q[1], u))];
 const inBox = (x, y, b) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
 const center = (b) => [Math.floor((b[0] + b[2]) / 2), Math.floor((b[1] + b[3]) / 2)];
 
-function edgePoint(box, toward) {
-  const [x0, y0, x1, y1] = box;
-  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-  const dx = toward[0] - cx, dy = toward[1] - cy;
-  if (!dx && !dy) return [Math.round(cx), Math.round(cy)];
-  const sx = dx ? (x1 - x0) / 2 / Math.abs(dx) : Infinity;
-  const sy = dy ? (y1 - y0) / 2 / Math.abs(dy) : Infinity;
-  const s = Math.min(sx, sy) + 0.02;
-  return [Math.round(cx + dx * s), Math.round(cy + dy * s)];
+// 按钮：hover 时提亮；off = 不可用
+function button(box, label, col, { off = false, size = 10, hot = false } = {}) {
+  const hover = !off && ptr.mouse && inBox(ptr.x, ptr.y, box);
+  const c = off ? K.DIM_D : col;
+  frame(...box, c, hover || hot ? rgba(off ? C.DIM_D : parseRgb(col), 0.28) : K.PANEL);
+  txt(center(box)[0], Math.round((box[1] + box[3]) / 2 - size / 2) + 1, label, size, off ? K.DIM_D : hover ? K.WHITE : c, 'ma');
 }
 
-// —— 室外小人（脚底中心为 x, y） ——
-function tinyPerson(x, y, coat, hat = null, step = 0, skin = K.SKIN) {
-  rect(x - 3, y + 1, x + 3, y + 1, K.GROUND_D);
-  rect(x - 2, y - 3, x - 1, y - (step ? 1 : 0), K.OUTLINE);
-  rect(x + 1, y - 3, x + 2, y - (step ? 0 : 1), K.OUTLINE);
-  rect(x - 2, y - 8, x + 2, y - 4, coat);
-  rect(x - 1, y - 11, x + 1, y - 9, skin);
-  if (hat) rect(x - 1, y - 11, x + 1, y - 11, hat);
-}
+const parseRgb = (s) => s.match(/\d+/g).slice(0, 3).map(Number);
+
+const mmss = (sec) => {
+  sec = Math.max(0, Math.ceil(sec));
+  return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+};

@@ -1,282 +1,90 @@
 'use strict';
-// 证件和纸张（移植自 pp/docs.py）。每种证件知道自己的尺寸、怎么画、各栏位的相对坐标（检查模式用）。
+// 桌面上的窗口：证件（凭证 / 令牌 / API 授权）、规则手册、官方通告、事故通知。
+// 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（比对模式用）。
 
-function docShadow(x, y, w, h) { rect(x + 2, y + 2, x + w + 1, y + h + 1, K.DESK_D); }
+const TITLE_H = 12;
+const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS' };
+const SIGNER_COL = { cred: C.CYAN, tok: C.AMBER, api: C.GREEN };
 
-class Passport {
-  constructor({ country, name, rows, person, cover = C.NAVY, band = C.NAVY_L, mrz = '' }) {
-    Object.assign(this, { country, name, rows, person, cover: rgb(cover), band: rgb(band), mrz });
-    this.shown = rows.map(([k, v]) => [T(k), T(v)]);
-    this.w = 176; this.h = 116;
-    this.icon = ['book', cover];
-    this.fields = { header: [3, 3, 172, 16], name: [56, 20, 172, 34], photo: [9, 22, 50, 73] };
-    rows.forEach(([k], i) => { this.fields[k] = [56, 40 + i * 12, 150, 51 + i * 12]; });
-  }
-
-  draw(x, y) {
-    const { w, h } = this;
-    docShadow(x, y, w, h);
-    rect(x, y, x + w - 1, y + h - 1, this.cover);
-    rect(x + 3, y + 3, x + w - 4, y + h - 4, K.PAPER);
-    for (let yy = y + 22; yy < y + h - 22; yy += 4) rect(x + 56, yy, x + w - 8, yy, K.PAPER_LINE);
-    rect(x + 3, y + 3, x + w - 4, y + 16, this.band);
-    txt(x + w / 2, y + 6, this.country, 8, K.PAPER, 'ma');
-    rect(x + 9, y + 22, x + 50, y + 73, K.PAPER_D);
-    spr('photo:' + this.person, x + 10, y + 23);
-    txt(x + 58, y + 22, this.name, tw(this.name, 12) > 112 ? 10 : 12, K.TEXT);
-    this.shown.forEach(([k, v], i) => {
-      txt(x + 58, y + 42 + i * 12, k, 8, K.TEXT_L);
-      txt(x + 80, y + 41 + i * 12, v, tw(v, 10) > 90 ? 8 : 10, K.TEXT);
-    });
-    spr('emblem', x + 18, y + 78);
-    if (this.mrz) txt(x + 8, y + h - 15, this.mrz, 8, K.TEXT_L);
-  }
+function winChrome(x, y, w, h, title, sub, col, colD) {
+  rect(x + 2, y + 2, x + w + 1, y + h + 1, 'rgba(0,0,0,0.45)');
+  rect(x, y, x + w - 1, y + h - 1, K.PANEL);
+  rect(x, y, x + w - 1, y + TITLE_H - 1, colD);
+  outline(x, y, x + w - 1, y + h - 1, col);
+  txt(x + 5, y + 2, title, 8, K.WHITE);
+  if (sub) txt(x + w - 5, y + 2, sub, 8, col, 'ra');
 }
 
-// 中转站本站：一本护照上写着 1,000 个名字，放到桌上会像手风琴一样往下展开
-const HOLDER_NAMES = ['KEVIN', '小王', 'TONY', '阿强', 'LUCY', '老张', 'MOMO', '大刘', 'JACK', '小美', 'ERIC', '阿杰',
-  'AMY', '胖虎', 'LEO', '小林', 'MIA', '二狗', 'SAM', '阿珍', 'BEN', '老李', 'IVY', '小赵'];
+// 数字签名：图案 + 签发机构 + 指纹（证件上和手册里画法一样，方便对照）
+function drawSeal(x, y, key, sig) {
+  const col = rgb(SIGNER_COL[key]);
+  frame(x, y, x + 19, y + 19, col, rgba(SIGNER_COL[key], 0.12));
+  pattern(SEAL_GLYPHS[sig.glyph], x + 3, y + 3, { X: col }, 2);
+  txt(x + 25, y + 1, sig.issuer, 8, K.TEXT);
+  txt(x + 25, y + 11, `指纹 ${sig.print}`, 8, K.DIM);
+}
 
-class AccordionPassport extends Passport {
-  constructor(opts) {
-    super(opts);
-    this.unfoldT = null;
-    this.rowsList = Array.from({ length: 80 }, (_, i) => `#${String(i + 1).padStart(4, '0')}  ${T(HOLDER_NAMES[(i * 7) % HOLDER_NAMES.length])}`);
+// 证件：标题 + 若干行 label / value + 底部签名；凭证左侧多一张头像
+class Doc {
+  constructor(key, rows, sig, photo = null) {
+    Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
+    this.w = photo ? 184 : 164;
+    this.vx = photo ? 54 : 4;
+    this.sealY = TITLE_H + 4 + Math.max(photo ? 46 : 0, 12 * rows.length) + 3;
+    this.h = this.sealY + 24;
+    this.fields = {};
+    if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
+    rows.forEach(([k], i) => { this.fields[`${key}.${k}`] = [this.vx, TITLE_H + 2 + 12 * i, this.w - 3, TITLE_H + 13 + 12 * i]; });
+    this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
   }
 
   draw(x, y) {
-    if (this.unfoldT !== null) {
-      // 下面放不下就往上展开
-      const up = H - (y + this.h) < 100;
-      const sx = x + 12, w = 152;
-      const L = Math.round(lerp(0, up ? 150 : 210, easeOut(seg(now, this.unfoldT, this.unfoldT + 2))));
-      const sy = up ? y + 6 - L : y + this.h - 6;
-      const scroll = Math.max(0, now - this.unfoldT - 2) * 30;
-      rect(sx + 2, sy + 2, sx + w + 1, sy + L + 1, K.DESK_D);
-      rect(sx, sy, sx + w - 1, sy + L, K.PAPER);
-      for (let fy = sy + 22; fy < sy + L; fy += 22) rect(sx, fy, sx + w - 1, fy, K.PAPER_D);
-      G.save(); G.beginPath(); G.rect(sx, sy + 2, w, Math.max(0, L - 4)); G.clip();
-      this.rowsList.forEach((s, i) => txt(sx + 8, sy + 6 + i * 11 - Math.floor(scroll) % 600, s, 8, K.TEXT));
-      G.restore();
+    const { w, h, vx } = this;
+    winChrome(x, y, w, h, this.title, this.sub, K.CYAN_D, rgb([18, 52, 56]));
+    if (this.photo) {
+      frame(x + 4, y + TITLE_H + 3, x + 49, y + TITLE_H + 48, K.LINE_L, K.INK);
+      spr(this.photo, x + 5, y + TITLE_H + 4, 2);
     }
-    super.draw(x, y);
-  }
-}
-
-// 乔治老哥用蜡笔画的“美国护照”（整张预渲染）
-class CrayonPassport {
-  constructor() {
-    this.w = 176; this.h = 116;
-    this.icon = ['book', [70, 90, 170]];
-    this.fields = { header: [3, 3, 172, 18], photo: [9, 22, 50, 73], eagle: [120, 70, 160, 104] };
-  }
-
-  draw(x, y) {
-    docShadow(x, y, this.w, this.h);
-    spr('crayon', x, y);
-  }
-}
-
-// 合上的护照封面（套娃用）
-class MiniPassport {
-  constructor(w, h, cover, label) {
-    Object.assign(this, { w, h, cover, label: T(label).toUpperCase() });
-    this.icon = ['book', cover];
-    this.fields = { all: [0, 0, w - 1, h - 1] };
-  }
-
-  draw(x, y) {
-    const { w, h } = this;
-    docShadow(x, y, w, h);
-    rect(x, y, x + w - 1, y + h - 1, rgb(this.cover));
-    if (w > 50) {
-      outline(x + 3, y + 3, x + w - 4, y + h - 4, K.GOLD);
-      spark(x + (w >> 1), y + (h >> 1) - 8, K.GOLD, false);
-      const size = tw(this.label, 10) < w - 12 ? 10 : 8;
-      txt(x + w / 2, y + h - 18, this.label, size, K.GOLD, 'ma');
-    } else {
-      txt(x + w / 2, y + h / 2 - 4, this.label, 8, K.GOLD, 'ma');
-    }
-  }
-}
-
-// 设备入境卡 / 账户卡：标题 + 若干行 label/value
-class Card {
-  constructor(rows, { title = '设备入境卡', sub = 'DEVICE ENTRY', color = C.PINK, colorD = C.PINK_D, valueX = 38, seal } = {}) {
-    this.rows = rows; this.title = T(title); this.sub = T(sub);
-    this.shown = rows.map(([k, v]) => [T(k), T(v)]);
-    this.color = rgb(color); this.colorD = rgb(colorD); this.valueX = valueX;
-    this.seal = seal === undefined ? rows.length >= 4 : seal;
-    this.w = 152;
-    this.h = 20 + 14 * rows.length + (this.seal ? 14 : 6);
-    this.icon = ['card', color];
-    this.fields = {};
-    rows.forEach(([k], i) => { this.fields[k] = [4, 18 + 14 * i, this.w - 5, 31 + 14 * i]; });
-  }
-
-  draw(x, y) {
-    const { w, h } = this;
-    docShadow(x, y, w, h);
-    rect(x, y, x + w - 1, y + h - 1, this.colorD);
-    rect(x + 1, y + 1, x + w - 2, y + h - 2, this.color);
-    rect(x + 1, y + 1, x + w - 2, y + 14, this.colorD);
-    txt(x + 6, y + 4, this.title, 10, K.TEXT);
-    txt(x + w - 6, y + 6, this.sub, 8, K.TEXT_L, 'ra');
-    if (this.seal) spr('seal', x + w - 40, y + h - 38);
-    const room = w - this.valueX - 6;
-    this.shown.forEach(([k, v], i) => {
-      const yy = y + 20 + i * 14;
-      const size = tw(v, 10) > room ? 8 : 10;
-      if (LANG === 'en' && tw(v, size) > room) v = v.replace(/ · /g, '·');   // 英文地名长，挤一挤
-      txt(x + 8, yy, k, 10, K.TEXT_L);
-      txt(x + this.valueX, yy, v, size, K.TEXT);
-      G.fillStyle = this.colorD;
-      for (let sx = x + 6; sx < x + w - 6; sx += 2) G.fillRect(sx, yy + 11, 1, 1);
+    this.rows.forEach(([k, v], i) => {
+      const yy = y + TITLE_H + 4 + i * 12;
+      txt(x + vx + 2, yy, k, 8, K.DIM);
+      txt(x + vx + 34, yy - 1, v, tw(v, 10) > w - vx - 40 ? 8 : 10, K.TEXT);
     });
+    rect(x + 4, y + this.sealY - 3, x + w - 5, y + this.sealY - 3, K.GRID);
+    drawSeal(x + 6, y + this.sealY + 1, this.key, this.sig);
   }
 }
 
-function accountCard(pay, bill, phone) {
-  return new Card([['付款', pay], ['账单', bill], ['手机', phone]],
-    { title: '账户卡', sub: 'ACCOUNT', color: C.SAGE, colorD: C.SAGE_D, seal: false });
-}
-
-// 夹在护照里的小纸条（地下中转联盟）
-class Note {
-  constructor(lines) {
-    this.lines = lines.map((s) => T(s));
-    this.w = Math.max(...this.lines.map((s) => tw(s, 10))) + 16;
-    this.h = 12 + 13 * lines.length;
-    this.icon = ['card', [236, 228, 204]];
-    this.fields = {};
-  }
-
-  draw(x, y) {
-    docShadow(x, y, this.w, this.h);
-    rect(x, y, x + this.w - 1, y + this.h - 1, 'rgb(236,228,204)');
-    G.fillStyle = K.DESK_D;
-    G.beginPath(); G.moveTo(x + this.w - 8, y); G.lineTo(x + this.w, y); G.lineTo(x + this.w, y + 8); G.fill();
-    this.lines.forEach((s, i) => txt(x + 8, y + 7 + i * 13, s, 10, 'rgb(70,70,96)'));
-  }
-}
-
-// 对齐部警告单（原作的罚单）
-class Citation {
-  constructor(lines) {
-    this.lines = lines.map((s) => T(s));
-    this.w = 168;
-    this.h = 26 + 13 * lines.length + 6;
-    this.icon = ['card', [226, 184, 176]];
-    this.fields = {};
-  }
-
-  draw(x, y) {
-    docShadow(x, y, this.w, this.h);
-    rect(x, y, x + this.w - 1, y + this.h - 1, 'rgb(226,184,176)');
-    rect(x, y, x + this.w - 1, y + 16, K.RED_D);
-    txt(x + 6, y + 4, T('M.O.A. 警告单'), 10, K.WHITE);
-    txt(x + this.w - 6, y + 6, 'CITATION', 8, 'rgb(226,184,176)', 'ra');
-    this.lines.forEach((s, i) => {
-      txt(x + 8, y + 22 + i * 13, s, tw(s, 10) > this.w - 14 ? 8 : 10, i === this.lines.length - 1 ? K.RED_D : K.TEXT);
-    });
-  }
-}
-
-// 打印机吐出来的长纸条（号码查询）
-class PrintStrip {
-  constructor(header, rows) {
-    this.header = header.map((s) => T(s)); this.rows = rows;
-    this.w = 128;
-    this.h = 10 + 13 * header.length + 6 + 10 * rows.length + 6;
-    this.icon = ['card', [232, 230, 222]];
-    this.fields = {};
-  }
-
-  draw(x, y) {
-    const { w, h } = this;
-    docShadow(x, y, w, h);
-    rect(x, y, x + w - 1, y + h - 1, 'rgb(232,230,222)');
-    G.fillStyle = K.GREY;
-    for (let yy = y + 3; yy < y + h; yy += 6) { G.fillRect(x + 2, yy, 1, 1); G.fillRect(x + w - 3, yy, 1, 1); }
-    let yy = y + 6;
-    for (const s of this.header) { txt(x + 8, yy, s, 10, K.INK); yy += 13; }
-    rect(x + 6, yy, x + w - 7, yy, K.GREY);
-    yy += 5;
-    for (const s of this.rows) { txt(x + 8, yy, s, 8, K.TEXT); yy += 10; }
-  }
-}
-
-// 结局：旅客递上来的不是护照，是一段 prompt
-class PromptPaper {
-  constructor(text) {
-    this.lines = wrap(T(text), 10, 158);
-    this.w = 176; this.h = 120;
-    this.icon = ['card', [236, 234, 226]];
-    this.fields = { text: [6, 20, 170, 20 + 13 * this.lines.length], header: [3, 3, 172, 16] };
-  }
-
-  draw(x, y) {
-    docShadow(x, y, this.w, this.h);
-    rect(x, y, x + this.w - 1, y + this.h - 1, 'rgb(236,234,226)');
-    rect(x + 3, y + 3, x + this.w - 4, y + 16, 'rgb(120,116,110)');
-    txt(x + 8, y + 6, T('PROMPT · 用户请求'), 8, K.WHITE);
-    this.lines.forEach((s, i) => txt(x + 9, y + 22 + i * 13, s, 10, K.INK));
-  }
-}
-
-// 同一个门牌号：桌上摞起来的地址卡
-function drawAddressCard(x, y) {
-  docShadow(x, y, 96, 34);
-  rect(x, y, x + 95, y + 33, K.PAPER_D);
-  rect(x + 1, y + 1, x + 94, y + 32, K.PAPER);
-  txt(x + 6, y + 6, '123 MAIN ST', 10, K.TEXT);
-  txt(x + 6, y + 20, 'PORTLAND, OR', 8, K.TEXT_L);
-}
-
-// 《Claude 宪法》：当天的入境规则，分两页。每条规则是一个可在检查模式里点选的栏位。
-const RULE_TABLE = [
-  ['美国', 'America/*', 'en-US'], ['英国', 'Europe/London', 'en-GB'], ['日本', 'Asia/Tokyo', 'ja-JP'],
-  ['德国', 'Europe/Berlin', 'de-DE'], ['新加坡', 'Asia/Singapore', 'en-SG'],
-];
-const RULES = [
-  { day: 1, page: 0, key: 'region', head: '§1 仅限支持地区入境', subs: ['支持：美国  英国  日本  德国  新加坡', '不支持：中国大陆  中国香港  中国澳门'] },
-  { day: 2, page: 0, key: 'tz', head: '§2 时区、语言须与 IP 归属一致', subs: RULE_TABLE.map((r) => r.join('|')) },
-  { day: 2, page: 0, key: 'quiz', head: '§3 测谎露馅者：拘留', subs: ['有疑点才能测谎（证件矛盾 / 话里的马脚）'] },
-  { day: 3, page: 1, key: 'pay', head: '§4 付款、账单、手机须真实', subs: ['禁止：虚拟卡、555 接码手机号', '账单所在州须与 IP 归属一致', '禁止拼车：一本护照只能一个人用'] },
-  { day: 4, page: 1, key: 'xray', head: '§5 后台进程须干净', subs: ['禁止“小猫咪”、中文输入法（『X光』）'] },
-  { day: 5, page: 1, key: 'corp', head: '§6 中资控股过半：一律禁止', subs: ['无论公司注册在哪（套娃要拆到底）'] },
-];
-
+// 《规则手册》：第 1 页规则，第 2 页合法签名式样
 class Rulebook {
-  constructor(day) {
-    this.day = day;
-    this.w = 200;
-    this.icon = ['book', C.BOOK];
-    const rules = RULES.filter((r) => r.day <= day);
-    this.npages = day >= 3 ? 2 : 1;
-    this.pages = [];
-    for (let p = 0; p < this.npages; p++) {
-      const L = [];
-      for (const r of rules.filter((q) => q.page === p)) {
-        L.push({ s: T(r.head), size: 10, col: r.day === day ? K.RED_D : K.TEXT, key: r.key, isNew: r.day === day });
-        for (const s of r.subs) L.push({ s: s.includes('|') ? s : T(s), size: 8, col: K.TEXT_L, key: r.key });
-      }
-      if (p === this.npages - 1) L.push({ s: T('§12 只看地区，不看脸'), size: 8, col: K.TEXT_L, key: null });
-      let y = 22;
-      const fields = {};
-      for (const row of L) {
-        row.y = y;
-        y += row.size === 10 ? 14 : 10;
-        if (row.key) {
-          const f = fields[row.key];
-          fields[row.key] = f ? [f[0], f[1], f[2], y - 2] : [4, row.y - 2, this.w - 5, y - 2];
-        }
-      }
-      this.pages.push({ rows: L, fields, h: y + 6 });
+  constructor() {
+    this.w = 212;
+    this.npages = 2;
+    const p0 = [], f0 = {};
+    let y = TITLE_H + 5;
+    for (const r of RULES) {
+      const y0 = y;
+      p0.push({ s: r.head, y, col: K.CYAN });
+      y += 12;
+      for (const s of r.subs || []) for (const ln of wrap(s, 8, this.w - 20)) { p0.push({ s: ln, y, col: K.DIM, indent: true }); y += 10; }
+      f0['rule.' + r.key] = [3, y0 - 2, this.w - 4, y - 2];
+      y += 3;
     }
-    this.h = Math.max(...this.pages.map((p) => p.h));
-    this.page = this.npages - 1;
-    this.tab = [this.w - 52, 3, this.w - 4, 16];
+    const h0 = y + 2;
+    const p1 = [], f1 = {};
+    y = TITLE_H + 5;
+    p1.push({ s: '合法签名式样', y, col: K.CLAUDE_L });
+    y += 14;
+    for (const key of ['cred', 'tok', 'api']) {
+      p1.push({ s: DOC_NAMES[key], y, col: K.CYAN });
+      p1.push({ seal: key, y: y + 10 });
+      f1['book.' + key] = [3, y - 2, this.w - 4, y + 31];
+      y += 36;
+    }
+    this.pages = [{ rows: p0, fields: f0 }, { rows: p1, fields: f1 }];
+    this.h = Math.max(h0, y + 2);
+    this.page = 0;
+    this.tab = [this.w - 44, 0, this.w - 1, TITLE_H - 1];
   }
 
   get fields() { return this.pages[this.page].fields; }
@@ -284,46 +92,68 @@ class Rulebook {
   flip() { this.page = (this.page + 1) % this.npages; }
 
   draw(x, y) {
-    const { w, h } = this;
-    docShadow(x, y, w, h);
-    rect(x, y, x + w - 1, y + h - 1, K.BOOK);
-    rect(x + 3, y + 3, x + w - 4, y + h - 4, K.PAPER);
-    rect(x + 3, y + 3, x + w - 4, y + 16, K.BOOK_L);
-    txt(x + 8, y + 5, T('宪法 · 入境规则'), 10, K.PAPER);
-    if (this.npages > 1) {
-      rect(x + this.tab[0], y + this.tab[1], x + this.tab[2], y + this.tab[3], K.BOOK);
-      txt(x + this.tab[2] - 4, y + 7, T('第{0}/{1}页 ▶', this.page + 1, this.npages), 8, K.PAPER, 'ra');
-    } else {
-      txt(x + w - 8, y + 7, `DAY ${this.day}`, 8, K.PAPER, 'ra');
-    }
+    winChrome(x, y, this.w, this.h, '规则手册', '', K.CLAUDE, rgb([70, 36, 26]));
+    rect(x + this.tab[0], y + 1, x + this.tab[2] - 1, y + this.tab[3], rgb([110, 56, 40]));
+    txt(x + this.tab[2] - 5, y + 2, `${this.page + 1}/${this.npages} ▶`, 8, K.WHITE, 'ra');
     for (const r of this.pages[this.page].rows) {
-      if (r.s.includes('|')) {
-        const [a, b, c] = r.s.split('|');
-        txt(x + 12, y + r.y, T(a), 8, r.col);
-        txt(x + 52, y + r.y, b, 8, r.col);
-        txt(x + 150, y + r.y, c, 8, r.col);
-        continue;
-      }
-      txt(x + 8, y + r.y, r.s, r.size, r.col);
-      if (r.isNew) {
-        const nx = x + 10 + tw(r.s, r.size);
-        rect(nx, y + r.y - 1, nx + 19, y + r.y + 8, K.RED);
-        txt(nx + 2, y + r.y, 'NEW', 8, K.WHITE);
-      }
+      if (r.seal) drawSeal(x + 8, y + r.y, r.seal, genuine(r.seal));
+      else txt(x + (r.indent ? 14 : 6), y + r.y, r.s, 8, r.col);
     }
   }
 }
 
-// 柜台上的小图标
-function smallIcon(kind, color, x, y) {
-  if (kind === 'book') {
-    rect(x, y, x + 18, y + 12, K.INK);
-    rect(x + 1, y + 1, x + 17, y + 11, rgb(color));
-    pt(x + 9, y + 6, K.GOLD);
-  } else {
-    const d = color.map((c) => Math.floor(c * 0.85)), d2 = color.map((c) => Math.floor(c * 0.8));
-    rect(x, y, x + 16, y + 10, rgb(d));
-    rect(x + 1, y + 1, x + 15, y + 9, rgb(color));
-    rect(x + 3, y + 4, x + 12, y + 4, rgb(d2));
+// 风控部官方通告（每次上岗时弹出）
+class OfficialNotice {
+  constructor(date, title, body) {
+    this.w = 220;
+    const L = [[`安索兹卡 ${date}`, K.DIM, 'ma'], ['风控部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
+      [title, K.WHITE], null, ...wrap(body, 8, this.w - 20).map((s) => [s, K.TEXT]), null,
+      ['翻阅规则手册查看生效的策略。', K.CYAN], null, ['荣耀归于ANTHROTZKA', K.CLAUDE_L, 'ma']];
+    let y = TITLE_H + 7;
+    this.lines = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
+    this.h = y + 4;
+    this.fields = {};
+    this.close = [this.w - 12, 1, this.w - 2, TITLE_H - 2];
   }
+
+  draw(x, y) {
+    winChrome(x, y, this.w, this.h, '通告 NOTICE', '', K.CLAUDE, rgb([70, 36, 26]));
+    txt(x + this.w - 7, y + 2, '×', 8, K.WHITE, 'ma');
+    for (const l of this.lines) txt(l.anchor === 'ma' ? x + this.w / 2 : x + 10, y + l.y, l.s, 8, l.col, l.anchor);
+  }
+}
+
+// 通知：处分、事故。右上角有关闭钮
+class NoticeWindow {
+  constructor(title, lines, tone = 'red') {
+    this.title = title;
+    this.tone = tone;
+    this.w = 184;
+    this.lines = lines.flatMap((s) => wrap(s, 8, this.w - 14));
+    this.h = TITLE_H + 6 + 11 * this.lines.length + 2;
+    this.fields = {};
+    this.close = [this.w - 12, 1, this.w - 2, TITLE_H - 2];
+  }
+
+  draw(x, y) {
+    const [col, colD] = this.tone === 'red' ? [K.RED, K.RED_D] : [K.AMBER, K.AMBER_D];
+    winChrome(x, y, this.w, this.h, this.title, '', col, colD);
+    txt(x + this.w - 7, y + 2, '×', 8, K.WHITE, 'ma');
+    this.lines.forEach((s, i) => txt(x + 7, y + TITLE_H + 5 + i * 11, s, 8, i === this.lines.length - 1 ? col : K.TEXT));
+  }
+}
+
+// 审查窗柜台上的小图标：证件（青）/ 规则手册（橙）
+function docIcon(x, y, hover, book = false) {
+  const col = book ? (hover ? K.CLAUDE_L : K.CLAUDE) : hover ? K.CYAN_L : K.CYAN;
+  frame(x, y, x + 25, y + 19, col, K.PANEL_L);
+  if (book) {
+    rect(x + 12, y + 4, x + 13, y + 15, col);
+    for (const yy of [6, 9, 12]) { rect(x + 5, y + yy, x + 10, y + yy, K.DIM); rect(x + 15, y + yy, x + 20, y + yy, K.DIM); }
+    return;
+  }
+  rect(x + 5, y + 5, x + 20, y + 6, col);
+  rect(x + 5, y + 9, x + 16, y + 9, K.DIM);
+  rect(x + 5, y + 12, x + 18, y + 12, K.DIM);
+  rect(x + 5, y + 15, x + 13, y + 15, K.DIM);
 }
