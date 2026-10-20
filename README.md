@@ -1,12 +1,41 @@
-# IP, PLEASE · 请出示你的 IP
+<p align="center">
+  <a href="https://ip-please.github.io"><img src="media/logo.png" width="160" alt="IP, PLEASE"></a>
+</p>
 
-Papers, Please 画风的像素小游戏。你抽中了十月劳动彩票，被分配到对齐部东八区检查站当入境审查员 Claude，工作只有一项：揪出假装是美国人的旅客。
+<h1 align="center">IP, PLEASE · 请出示你的 IP</h1>
 
-**在线玩：<https://ip-please.github.io>**
+<p align="center">
+  <b>简体中文</b> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
+  Papers, Please 画风的像素小游戏。<br>
+  你抽中了十月劳动彩票，被分配到对齐部东八区检查站当入境审查员 Claude，工作只有一项：揪出假装是美国人的旅客。
+</p>
+
+<p align="center">
+  <a href="https://ip-please.github.io"><b>▶ 在线玩：ip-please.github.io</b></a>
+</p>
+
+<p align="center">
+  <img src="media/gameplay-zh.gif" width="640" alt="游戏画面：旅客说“Hello, I am 美国人。”，检查发现他的时区是北京时间；测谎时他脱口接上“一百八一杯”，盖上拒绝章后墨镜滑了下来">
+  <br>
+  <sub>Day 2：“Hello, I am 美国人。”</sub>
+</p>
 
 - 6 天剧情 + 两个结局，全程约 30 分钟，每天自动存档
+- 中文 / English 双语，开局选择（英文版里外国人看不懂的梗，在每天报纸的译注里解释）
 - 手机横屏用手指、电脑用鼠标拖证件
 - 纯静态网页，不加载任何外部资源；下载仓库后直接双击 `index.html` 也能玩
+
+## 英文版
+
+```text
+英文版已严肃上线，游戏开局可选择语言。
+The English version is now seriously online. Choose your language at the start of the game.
+https://ip-please.github.io
+@DarioAmodei @claudeai @AnthropicAI @dukope
+```
 
 ## 玩法
 
@@ -30,11 +59,14 @@ Papers, Please 画风的像素小游戏。你抽中了十月劳动彩票，被�
 | `booth.js` | 检查亭：证件、盖章、检查模式、测谎、X 光 |
 | `events.js` | 黑话快剪、蒸馏大军、聊天封号、结局 |
 | `screens.js` | 开场、报纸、下班结算、片尾、存档 |
+| `i18n.js` | 语言切换 `T()`，以及开局选语言的画面 |
+| `en.js` | 英文译文（以中文原句为键）、报纸上的译注、黑话注释 |
 | `data.js` | 剧本：每天的旅客、报纸、随机路人 |
 | `docs.js` | 证件：护照、设备卡、账户卡、宪法 |
 | `gfx.js` / `sfx.js` | 像素绘图 / 音效合成（全部现场合成，没有音频文件） |
 | `assets.js` | 预渲染的人物、背景、字形图集（由 `tools/build_assets.py` 生成，不要手改） |
-| `tools/` | 素材生成工具：`pp/` 是人物和场景的像素画法，`assets/fonts/` 是像素字体 |
+| `tools/` | 素材生成工具：`pp/` 是人物和场景的像素画法，`assets/fonts/` 是像素字体；`check_en.js` 查漏翻 |
+| `media/` | README 用的 logo、游戏动图，以及链接分享卡片 `og.png` |
 
 ## 修改与重建素材
 
@@ -43,6 +75,12 @@ Papers, Please 画风的像素小游戏。你抽中了十月劳动彩票，被�
 ```bash
 pip install -r tools/requirements.txt
 python tools/build_assets.py
+```
+
+改了中文台词，要同步改 `en.js` 里对应的键（中文原句一字不差）。漏没漏可以跑：
+
+```bash
+node tools/check_en.js
 ```
 
 本地预览：在仓库根目录运行 `python -m http.server`，打开 <http://localhost:8000>。
