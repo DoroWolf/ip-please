@@ -7,14 +7,21 @@ const REVIEW = [0, 118, 213, H - 1];
 const SCREEN = [216, 118, W - 1, H - 1];
 const DESK_AREA = [217, 119, W - 2, 343];
 const TASKBAR = [216, 344, W - 1, H - 1];
-const BOOK_BTN = [220, 346, 262, 357], INSPECT_BTN = [266, 346, 308, 357];
-const APPROVE_BTN = [330, 346, 384, 357], DENY_BTN = [388, 346, 442, 357];
+const TASK_X = [220, 540];   // 任务栏上放窗口按钮的范围（右边是日期）
 const DATE_BOX = [548, 346, 636, 357];
+const LOWER = [0, 118, W - 1, H - 1];   // 下方操作区：比对模式整块压暗
+// 桌面右下角一排应用：手册 / 通告 / 历史记录 / 比对
+const APPS = { book: '手册', notice: '通告', hist: '历史记录', insp: '比对' };
+const APP_BOX = {};
+Object.keys(APPS).forEach((k, i) => { const x = 500 + i * 34; APP_BOX[k] = [x, 310, x + 25, 329]; });
+const INSPECT_ICON = APP_BOX.insp;
+// 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拦截 栏即做出决定
+const TRAY_W = 72, TRAY_BOX = [W - TRAY_W, 154, W - 1, 270], TRAY_HOT = [W - 10, 119, W - 1, 343];
+const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W - 6, 264] };
 const NEXT_BTN = [10, 322, 70, 348];
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
-const RV_FIELDS = { 'rv.节点': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171] };
-const BOOK_ICON = [182, 326];
+const RV_FIELDS = { 'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171] };
 const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
 const SPLIT_X = 512;   // 放行向上、拦截向下的分流口（右侧道路拉长后再分叉）
@@ -80,20 +87,18 @@ function newRun(m) {
 function startShift() {
   D = {
     started: false, tStart: 0, timeAdj: 0,
-    queue: [], nextArrive: 0, ent: null, wins: [], icons: [], book: null, lines: [], timers: [], flows: [],
+    queue: [], nextArrive: 0, ent: null, wins: [], icons: [], lines: [], chat: [], timers: [], flows: [],
     insp: { on: false, sel: [], banner: null }, toast: null, gateT: -9,
     closing: false, ended: false,
     pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
-    intro: now, typed: -1,
+    intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now },
   };
   // 上班时门口早已挤满请求，队尾一直排到看不见的地方
   for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
   D.rulebook = new Rulebook();
-  D.icons.push({ win: D.rulebook, book: true });
-  layoutIcons();
   const M = mode();
-  const note = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice);
-  D.wins.push({ win: note, kind: 'notice', x: 316, y: 126 });
+  D.notice = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice);
+  addWin(D.notice, 'notice', 316, 126);
   if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
   if (RUN.mode === 'story' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
 }
@@ -111,8 +116,10 @@ function newPacket(t) {
   return { t, col: pick([C.CYAN, C.CYAN_D, C.CYAN_L, C.DIM, C.TEXT]) };
 }
 
-function say(who, text) {
-  D.lines.push({ t: now, who, text, ent: D.ent });
+function say(who, text, key = null) {
+  const ln = { t: now, who, text, ent: D.ent, key };
+  D.lines.push(ln);
+  D.chat.push(ln);   // 历史记录窗口：当前这段对话，下一单进来时清空
   SFX.mumble(text, who === 'C' ? 176 : D.ent ? D.ent.voice : 125, D.lines.length * 7);
 }
 
@@ -138,6 +145,7 @@ const clockUrgent = () => { const left = minsToClose(); return left > 0 && left 
 // ———————————————————— 请求进出 ————————————————————
 
 function callNext() {
+  if (D.ent && D.ent.decided && !D.ent.leaving) { toast('先把证件拖回头像处，还给对方', K.AMBER); return; }
   if (D.ent || D.ended || RUN.fail) return;
   if (D.closing) { toast('已经下班，不再接新请求'); return; }
   if (!D.queue.length) { toast('队列暂时为空，等待新请求……'); return; }
@@ -145,13 +153,14 @@ function callNext() {
   SFX.play('intercom', 0.8);
   D.queue.shift();
   D.gateT = now;
+  D.chat.length = 0;   // 历史记录：新的请求进来，上一段对话清空
   const spec = makeRequest(today(), mode().pBad);
-  const e = { spec, t0: now, voice: rint(100, 190), handed: false, leaving: false, asked: new Set() };
+  const e = { spec, t0: now, voice: rint(100, 190), handed: false, leaving: false, asked: new Set(), decided: null, judged: false };
   D.ent = e;
   D.hinted.next = true;
   say('C', '下一个请求。');
   const k = mode().pace;
-  later(0.5 * k, () => { if (D.ent === e) say('E', spec.greet); });
+  later(0.5 * k, () => { if (D.ent === e) say('E', `${spec.greet} ${spec.task}`, 'req'); });
   later(1.2 * k, () => handDocs(e));
 }
 
@@ -165,25 +174,31 @@ function handDocs(e) {
 
 function layoutIcons() {
   let i = 0;
-  for (const ic of D.icons) {
-    if (ic.book) [ic.x, ic.y] = BOOK_ICON;
-    else { ic.x = 80 + i * 32; ic.y = 326; i++; }
-  }
+  for (const ic of D.icons) { ic.x = 80 + i * 32; ic.y = 326; i++; }
 }
 
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
 
+// 做出决定：在凭证上盖章。交还证件前随时可以改主意，重新盖章只是换章，不判定。
+// 真正的判定（对不对、算不算事故）等到证件全部交还、请求处理完毕才做。
 function decide(kind) {
   const e = D.ent;
   if (!e || !e.handed || e.leaving || RUN.fail) return;
-  e.leaving = true; e.tLeave = now;
+  if (e.decided === kind) return;
+  e.decided = kind;
+  const cred = e.spec.docs.find((d) => d.key === 'cred');
+  if (cred) cred.stamp = kind;
+  D.hinted.stamp = true;
   SFX.play(kind === 'approve' ? 'accept' : 'reject');
-  D.flows.push({ t0: now, kind });
-  D.wins = D.wins.filter((w) => w.kind !== 'doc');
-  D.icons = D.icons.filter((ic) => ic.book);
+}
+
+// 证件全部归还：请求处理完毕，这时才判定
+function finishRequest(e) {
+  if (e.decided && !e.judged) { e.judged = true; judge(e, e.decided); }
+  e.leaving = true; e.tLeave = now;
+  D.flows.push({ t0: now, kind: e.decided });
   setInspect(false);
   D.insp.banner = null;
-  judge(e, kind);
   later(0.6, () => { if (D.ent === e) D.ent = null; });
 }
 
@@ -227,8 +242,8 @@ function judge(e, kind) {
 
 function notice(title, lines, tone = 'red') {
   const win = new NoticeWindow(title, lines, tone);
-  const n = D.wins.filter((w) => w.kind === 'notice').length;
-  D.wins.push({ win, kind: 'notice', x: 226 + n * 8, y: 156 + n * 8 });
+  const n = D.wins.filter((w) => w.kind === 'cite').length;
+  addWin(win, 'cite', 226 + (n % 6) * 8, 156 + (n % 6) * 8);
   if (tone === 'red') { SFX.play('citation'); later(0.25, () => SFX.play('discrepancy', 0.5)); }
 }
 
@@ -270,21 +285,119 @@ function updateDesk() {
   if (D.closing && !D.ent) endDay();
 }
 
-// ———————————————————— 输入 ————————————————————
+// ———————————————————— 桌面窗口 ————————————————————
+// 窗口 kind：doc 证件 / cite 处分通知 / 应用 book 手册、notice 通告、hist 历史记录。
+// 证件和通知只能最小化；应用还能关掉（任务栏上的按钮跟着消失）。seq 决定任务栏上的顺序
 
 const iconBox = (ic) => [ic.x, ic.y, ic.x + 25, ic.y + 19];
 const winBox = (w) => [w.x, w.y, w.x + w.win.w - 1, w.y + w.win.h - 1];
+const shownWins = () => D.wins.filter((w) => !w.min);
+const topWin = () => shownWins().pop() || null;
+const docsOut = () => D.wins.some((w) => w.kind === 'doc') || D.icons.length > 0;
+
+function addWin(win, kind, x, y) {
+  const w = { win, kind, x, y, seq: ++D.seq, min: false };
+  D.wins.push(w);
+  return w;
+}
+
+function raise(w) {
+  w.min = false;
+  D.wins = D.wins.filter((o) => o !== w).concat([w]);
+}
+
+function minimize(w) { w.min = true; SFX.play('click'); }
+
+function closeWin(w) {
+  if (w.kind === 'book') RUN.bookPos = [w.x, w.y];
+  D.wins = D.wins.filter((o) => o !== w);
+  SFX.play('click');
+}
+
+// 任务栏按钮：窗口多了就变窄，文字塞不下就截短
+function taskButtons() {
+  const ws = [...D.wins].sort((a, b) => a.seq - b.seq);
+  const gap = 3, bw = Math.min(64, Math.floor((TASK_X[1] - TASK_X[0] + gap) / Math.max(1, ws.length)) - gap);
+  return ws.map((w, i) => {
+    const x = TASK_X[0] + i * (bw + gap);
+    return { w, box: [x, TASKBAR[1] + 2, x + bw - 1, TASKBAR[3] - 2] };
+  });
+}
+
+// 点任务栏：最小化的 / 被挡住的提到最前，已经在最前的就最小化
+function taskClick(w) {
+  if (w.min || w !== topWin()) { raise(w); SFX.play('select', 0.6); } else minimize(w);
+}
+
+// 应用图标＝开关：开着但被别的窗口挡住的先提到最前（激活）；已经激活的再点一次就关闭，
+// 窗口从桌面上移除，任务栏上的按钮跟着消失。关掉的只是窗口，历史记录仍然继续记录
+function openApp(key) {
+  if (key === 'insp') return setInspect(!D.insp.on);
+  const w = D.wins.find((o) => o.kind === key);
+  if (w) {
+    if (w.min || w !== topWin()) { raise(w); SFX.play('select', 0.6); return; }
+    return closeWin(w);
+  }
+  SFX.play('select');
+  const win = key === 'book' ? D.rulebook : key === 'notice' ? D.notice : new HistoryLog(D.chat);
+  const [x, y] = key === 'book' ? RUN.bookPos : key === 'notice' ? [316, 126] : [380, 140];
+  addWin(win, key, ...clampDesk(x, y, win));
+}
+
+// ———————————————————— 右侧决定栏 ————————————————————
+
+function updateTray() {
+  const T = D.tray, dt = Math.min(0.1, now - T.last);
+  T.last = now;
+  const ok = !D.insp.on && D.intro === null && !D.ended;
+  T.open = ok && (inBox(ptr.x, ptr.y, TRAY_HOT) || (T.open && inBox(ptr.x, ptr.y, TRAY_BOX)));
+  T.u = clamp(T.u + (T.open ? dt : -dt) / 0.15);
+}
+
+function stampZoneAt(x, y) {
+  if (D.tray.u < 0.9) return null;
+  return Object.keys(STAMP_ZONES).find((k) => inBox(x, y, STAMP_ZONES[k])) || null;
+}
+
+const draggedWin = () => drag && drag.moved && drag.inst.win;
+
+// 证件的两个放置目标：右侧决定栏（只认凭证，随时可以重新盖成另一栏）、
+// 审查窗的头像（做出决定后归还证件）
+function dropDoc(win, x, y, remove) {
+  const e = D.ent;
+  if (!e || e.leaving || !e.spec.docs.includes(win)) return false;
+  const zone = stampZoneAt(x, y);
+  if (zone) {
+    if (win.key !== 'cred') toast('把凭证拖到这里来做决定', K.AMBER);
+    else decide(zone);
+    return true;
+  }
+  if (!inBox(x, y, AVATAR_BOX)) return false;
+  if (!e.decided) { toast('先把凭证拖到右侧的 放行 / 拦截 栏', K.AMBER); return true; }
+  remove();
+  layoutIcons();
+  SFX.play('select', 0.6);
+  if (!docsOut()) finishRequest(e);
+  return true;
+}
+
+// ———————————————————— 输入 ————————————————————
 
 function deskDown(x, y) {
-  if (D.intro !== null) return;   // 开场不可跳过
+  if (D.intro !== null) return endIntro();
   if (D.ended) return;
-  if (inBox(x, y, BOOK_BTN)) return toggleBook();
-  if (inBox(x, y, INSPECT_BTN)) return setInspect(!D.insp.on);
-  if (inBox(x, y, APPROVE_BTN)) return decide('approve');
-  if (inBox(x, y, DENY_BTN)) return decide('deny');
   const b = D.insp.banner;
   if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
-  if (D.insp.on && (inBox(x, y, SCREEN) || fieldAt(x, y))) return inspectClick(x, y);
+  if (inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
+  if (D.insp.on) {
+    // 比对模式下也能翻手册的页签，方便对照签名式样
+    const w = topWinAt([x, y]);
+    if (w && w.kind === 'book' && inBox(x - w.x, y - w.y, w.win.tab)) { w.win.flip(); SFX.play('select'); return; }
+    if (inBox(x, y, LOWER)) inspectClick(x, y);
+    return;
+  }
+  if (D.tray.u > 0.5 && inBox(x, y, TRAY_BOX)) return;
+  for (const t of taskButtons()) if (inBox(x, y, t.box)) return taskClick(t.w);
   if (inBox(x, y, NEXT_BTN)) return callNext();
   for (const ic of [...D.icons].reverse()) {
     if (!inBox(x, y, iconBox(ic))) continue;
@@ -292,12 +405,15 @@ function deskDown(x, y) {
     SFX.play('select', 0.6);
     return;
   }
-  for (const w of [...D.wins].reverse()) {
+  if (!inBox(x, y, SCREEN)) return;
+  for (const w of shownWins().reverse()) {
     if (!inBox(x, y, winBox(w))) continue;
-    D.wins = D.wins.filter((o) => o !== w).concat([w]);
+    raise(w);
     drag = { type: 'win', inst: w, off: [x - w.x, y - w.y], prev: [w.x, w.y], start: [x, y], moved: false };
     return;
   }
+  const app = Object.keys(APP_BOX).find((k) => inBox(x, y, APP_BOX[k]));
+  if (app) openApp(app);
 }
 
 function deskMove(x, y) {
@@ -318,56 +434,49 @@ function deskUp(x, y) {
   const w = d.inst;
   if (d.type === 'icon') {
     delete w.dx; delete w.dy;
-    if (!d.moved || x < SCREEN[0]) return;
+    if (!d.moved) return;
+    if (dropDoc(w.win, x, y, () => { D.icons = D.icons.filter((o) => o !== w); })) return;
+    if (x < SCREEN[0]) return;
     D.icons = D.icons.filter((o) => o !== w);
     layoutIcons();
     const [px, py] = clampDesk(x - 20, y - 6, w.win);
-    const inst = { win: w.win, kind: w.book ? 'book' : 'doc', x: px, y: py };
-    if (w.book) D.book = inst;
-    D.wins.push(inst);
+    addWin(w.win, 'doc', px, py);
     SFX.play('select');
     return;
   }
   if (!d.moved) {
     const rx = x - w.x, ry = y - w.y;
+    if (w.win.closable && inBox(rx, ry, CLOSE_BOX(w.win))) return closeWin(w);
+    if (inBox(rx, ry, MIN_BOX(w.win))) return minimize(w);
     if (w.kind === 'book' && inBox(rx, ry, w.win.tab)) { w.win.flip(); SFX.play('select'); }
-    if (w.kind === 'notice' && inBox(rx, ry, w.win.close)) stow(w);
     return;
   }
-  if (!w.out) return;
+  const out = w.out;
   delete w.out;
+  // 拖去盖章 / 归还：盖完章的窗口回到原位
+  if (dropDoc(w.win, x, y, () => { D.wins = D.wins.filter((o) => o !== w); })) { [w.x, w.y] = d.prev; return; }
+  if (!out) { if (w.kind === 'book') RUN.bookPos = [w.x, w.y]; return; }
   [w.x, w.y] = d.prev;
-  stow(w);
+  if (w.kind === 'doc') stow(w);
 }
 
-// 拖回审查窗：证件和手册收回成柜台上的图标，通知直接关掉
+// 拖回审查窗：证件收回成柜台上的图标（应用窗口和通知不能收，只能最小化）
 function stow(w) {
   D.wins = D.wins.filter((o) => o !== w);
-  if (w.kind === 'notice') { SFX.play('click'); return; }
-  if (w.kind === 'book') { RUN.bookPos = [w.x, w.y]; D.book = null; }
-  D.icons.push({ win: w.win, book: w.kind === 'book' });
+  D.icons.push({ win: w.win });
   layoutIcons();
   SFX.play('select', 0.6);
 }
 
-function toggleBook() {
-  SFX.play('select');
-  if (D.book) { stow(D.book); return; }
-  D.icons = D.icons.filter((ic) => !ic.book);
-  layoutIcons();
-  const [x, y] = clampDesk(RUN.bookPos[0], RUN.bookPos[1], D.rulebook);
-  D.book = { win: D.rulebook, kind: 'book', x, y };
-  D.wins.push(D.book);
-}
-
 function deskKey(k) {
-  if (D.intro !== null) return;   // 开场不可跳过
+  if (D.intro !== null) return endIntro();
   if (D.ended) return;
   if (k === ' ' || k === 'n') callNext();
   else if (k === 'a') decide('approve');
   else if (k === 'd') decide('deny');
   else if (k === 'e') setInspect(!D.insp.on);
-  else if (k === 'r') toggleBook();
+  else if (k === 'r') openApp('book');
+  else if (k === 'h') openApp('hist');
 }
 
 function clampDesk(x, y, win) {
@@ -386,10 +495,10 @@ function setInspect(on) {
   SFX.play(on ? 'inspect_on' : 'inspect_off');
 }
 
-// 能点的栏位：桌面窗口里的行、审查窗里的节点信息、任务栏日期
+// 能点的栏位：桌面窗口里的行（含历史记录）、审查窗里的接入者信息、任务栏日期
 function fieldBoxes() {
   const out = [];
-  for (const w of D.wins) {
+  for (const w of shownWins()) {
     for (const [key, f] of Object.entries(w.win.fields)) out.push({ key, box: [w.x + f[0], w.y + f[1], w.x + f[2], w.y + f[3]], w });
   }
   out.push({ key: 'sys.日期', box: DATE_BOX, w: null });
@@ -403,11 +512,19 @@ function fieldBoxes() {
 function fieldAt(x, y) {
   const all = fieldBoxes();
   if (inBox(x, y, SCREEN)) {
-    for (const w of [...D.wins].reverse()) {
+    for (const w of shownWins().reverse()) {
       if (inBox(x, y, winBox(w))) return all.find((fb) => fb.w === w && inBox(x, y, fb.box)) || null;
     }
   }
   return all.find((fb) => !fb.w && inBox(x, y, fb.box)) || null;
+}
+
+// 比对结果：矛盾 / 无矛盾（本来就能对得上） / 无关联（这两项没有可核对的关系）
+function compareOutcome(e, keys) {
+  const issue = e && e.handed && !e.leaving && e.spec.issues.find((is) => is.pairs.some((p) => p.slice().sort().join('|') === keys));
+  if (issue) return { ok: true, kind: 'bad', issue, title: issue.title, sub: issue.sub };
+  if (e && e.spec.checks && e.spec.checks.has(keys)) return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
+  return { ok: false, kind: 'none', title: '无关联', sub: '这两项信息之间没有可核对的关系' };
 }
 
 function inspectClick(x, y) {
@@ -420,15 +537,9 @@ function inspectClick(x, y) {
   SFX.play('select');
   if (I.sel.length < 2) return;
   const keys = I.sel.map((s) => s.key).sort().join('|');
-  const e = D.ent;
-  const issue = e && e.handed && !e.leaving && e.spec.issues.find((is) => is.pairs.some((p) => p.slice().sort().join('|') === keys));
-  if (issue) {
-    I.banner = { ok: true, issue, title: issue.title, sub: issue.sub, t: now };
-    SFX.play('discrepancy');
-  } else {
-    I.banner = { ok: false, title: '未发现矛盾', sub: '这两项信息之间没有冲突', t: now };
-    SFX.play('click');
-  }
+  const res = compareOutcome(D.ent, keys);
+  I.banner = { ...res, t: now };
+  SFX.play(res.kind === 'bad' ? 'discrepancy' : 'click');
 }
 
 function askAbout(issue) {
@@ -449,8 +560,8 @@ function drawDesk() {
   drawScreen();
   if (D.insp.on) drawInspect();
   if (!drawBanner()) drawToast();
-  if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true, drag.inst.book);
-  if (drag && drag.type === 'win' && drag.inst.out) docIcon(ptr.x - 8, ptr.y - 6, true, drag.inst.kind === 'book');
+  if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true);
+  if (drag && drag.type === 'win' && drag.inst.out && drag.inst.kind === 'doc') docIcon(ptr.x - 8, ptr.y - 6, true);
   if (D.intro !== null) drawIntro();
   scanlines(0, 0, W - 1, H - 1, 0.12);
 }
@@ -554,10 +665,12 @@ function drawReview() {
     }
     txt(ax + as / 2, ay + as / 2 - 4, Math.floor(now * 2) % 2 ? '等待连接_' : '等待连接', 8, K.DIM, 'ma');
   }
-  // 节点信息
+  // 做出决定后：头像处闪框，提示把证件拖回来
+  if (e && e.decided && !e.leaving) outline(ax - 2, ay - 2, ax + as + 1, ay + as + 1, Math.floor(now * 3) % 2 ? K.AMBER : K.CYAN_D);
+  // 接入者信息
   const ready = avatarReady(e);
   const s = e && e.spec;
-  [['节点', s && s.id], ['昵称', s && s.handle], ['类型', s && (s.kind === 'api' ? 'API 调用' : '对话')]].forEach(([k, v], i) => {
+  [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && (s.kind === 'api' ? 'API 调用' : '对话')]].forEach(([k, v], i) => {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
     txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? (k === '类型' && s.kind === 'api' ? K.AMBER : K.TEXT) : K.DIM_D);
   });
@@ -580,8 +693,8 @@ function drawReview() {
   button(NEXT_BTN, '下一位', K.CYAN, { off: !canCall, hot: canCall && !D.hinted.next && Math.floor(now * 2) % 2 === 0 });
   for (const ic of D.icons) {
     if (drag && drag.inst === ic && drag.moved) continue;
-    docIcon(ic.x, ic.y, ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)), ic.book);
-    txt(ic.x + 13, ic.y + 22, ic.book ? '手册' : ic.win.key === 'api' ? 'API' : ic.win.title, 8, K.DIM, 'ma');
+    docIcon(ic.x, ic.y, ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)));
+    txt(ic.x + 13, ic.y + 22, ic.win.key === 'api' ? 'API' : ic.win.title, 8, K.DIM, 'ma');
   }
 }
 
@@ -611,9 +724,12 @@ function clipScreen() {
   G.beginPath(); G.rect(SCREEN[0] + 1, SCREEN[1], SCREEN[2] - SCREEN[0], TASKBAR[1] - SCREEN[1]); G.clip();
 }
 
-function drawWins() {
+// 正在拖的窗口最后画（盖在决定栏上面，拖去盖章时看得见）
+const draggingWin = () => (drag && drag.type === 'win' && drag.moved && !drag.inst.out ? drag.inst : null);
+
+function drawWins(only = null) {
   clipScreen();
-  for (const w of D.wins) if (!w.out) w.win.draw(w.x, w.y);
+  for (const w of only ? [only] : shownWins()) if (!w.out && (only || w !== draggingWin())) w.win.draw(w.x, w.y);
   G.restore();
 }
 
@@ -623,55 +739,120 @@ function drawScreen() {
   for (let x = x0 + 8; x < x1; x += 16) for (let y = y0 + 8; y < TASKBAR[1]; y += 16) pt(x, y, K.LINE);
   txt((x0 + x1) >> 1, 236, 'H-0417  RISK CONTROL TERMINAL', 8, K.GRID, 'ma');
   rect(x0, y0, x0, y1, K.LINE);
+  drawAppIcons();
   drawWins();
   if (D.wins.some((w) => w.kind === 'doc')) D.hinted.drag = true;
-  if (D.icons.some((ic) => !ic.book) && !D.hinted.drag && !D.insp.on) txt(x0 + 6, TASKBAR[1] - 12, '◀ 把柜台上的证件拖到桌面上查看', 8, K.AMBER);
+  const e = D.ent;
+  let hint = null;
+  if (e && e.decided && !e.leaving) hint = `◀ 已选${e.decided === 'approve' ? '放行' : '拦截'}：交还全部证件才判定，交还前可再盖章改选`;
+  else if (D.icons.length && !D.hinted.drag) hint = '◀ 把柜台上的证件拖到桌面上查看';
+  else if (e && e.handed && !e.decided && !D.hinted.stamp) hint = '把凭证拖到桌面右边缘，放进 放行 / 拦截 栏 ▶';
+  if (hint && !D.insp.on) txt(x0 + 6, TASKBAR[1] - 12, hint, 8, K.AMBER);
   drawTaskbar();
+  drawTray();
+  if (draggingWin()) drawWins(draggingWin());
 }
 
+function drawAppIcons() {
+  const hov = (b) => ptr.mouse && inBox(ptr.x, ptr.y, b);
+  const stale = RUN.mode === 'story' && RUN.stale > 0;
+  for (const [k, label] of Object.entries(APPS)) {
+    const b = APP_BOX[k];
+    const on = k === 'insp' ? D.insp.on : D.wins.some((w) => w.kind === k && !w.min);
+    const off = k === 'insp' && stale;
+    appIcon(b[0], b[1], k, hov(b), on, off);
+    txt(center(b)[0], b[3] + 3, label, 8, off ? K.DIM_D : on ? (k === 'insp' ? K.AMBER : K.TEXT) : K.DIM, 'ma');
+  }
+}
+
+// 任务栏：每个桌面窗口一个按钮（色块 + 名字）
+const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN };
 function drawTaskbar() {
   rect(...TASKBAR, K.PANEL);
   rect(TASKBAR[0], TASKBAR[1], TASKBAR[2], TASKBAR[1], K.LINE_L);
-  const e = D.ent, can = e && e.handed && !e.leaving;
-  button(BOOK_BTN, '手册', K.CLAUDE_L, { size: 8, hot: !!D.book });
-  button(INSPECT_BTN, '比对', K.AMBER, { size: 8, hot: D.insp.on, off: RUN.mode === 'story' && RUN.stale > 0 });
-  button(APPROVE_BTN, '放行', K.GREEN, { size: 8, off: !can });
-  button(DENY_BTN, '拦截', K.RED, { size: 8, off: !can });
+  const top = topWin();
+  for (const { w, box } of taskButtons()) {
+    const col = w.win.tone ? (w.win.tone === 'red' ? C.RED : C.AMBER) : TASK_COL[w.kind];
+    const hover = ptr.mouse && inBox(ptr.x, ptr.y, box);
+    frame(...box, rgb(w.min ? C.DIM_D : col), w === top ? rgba(col, 0.28) : hover ? K.PANEL_L : K.INK);
+    rect(box[0] + 3, box[1] + 3, box[0] + 5, box[3] - 3, rgb(col));
+    let s = w.win.title;
+    while (s && tw(s, 8) > box[2] - box[0] - 11) s = s.slice(0, -1);
+    if (s) txt(box[0] + 9, box[1] + 2, s, 8, w.min ? K.DIM : K.TEXT);
+  }
   // 世界观时间只在故事模式显示；日期都要显示（核对有效期）
   const s = RUN.mode === 'story' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today());
   txt(DATE_BOX[2], DATE_BOX[1] + 2, s, 8, K.TEXT, 'ra');
 }
 
-// 比对模式：桌面压暗，所有可点的栏位描黄框
+// 决定栏：收起时只在右边缘露出把手
+function drawTray() {
+  updateTray();
+  const dx = Math.round((1 - easeOut(D.tray.u)) * TRAY_W);
+  const [bx0, by0, bx1, by1] = TRAY_BOX;
+  clipScreen();
+  frame(bx0 + dx - 5, 196, bx0 + dx, 228, K.LINE_L, K.PANEL_L);
+  for (const yy of [206, 211, 216]) rect(bx0 + dx - 3, yy, bx0 + dx - 2, yy + 1, K.DIM);
+  if (D.tray.u > 0) {
+    frame(bx0 + dx, by0, bx1 + dx + 4, by1, K.LINE_L, K.PANEL);
+    const win = draggedWin();
+    const holding = win && win.key === 'cred' && D.ent && D.ent.spec.docs.includes(win) && !D.ent.leaving;
+    for (const [k, b] of Object.entries(STAMP_ZONES)) {
+      const [col, colD] = k === 'approve' ? [C.GREEN, C.GREEN_D] : [C.RED, C.RED_D];
+      const over = holding && inBox(ptr.x, ptr.y, b);
+      frame(b[0] + dx, b[1], b[2] + dx, b[3], rgb(col), over ? rgba(col, 0.35) : rgba(colD, holding ? 0.8 : 0.45));
+      const cx = ((b[0] + b[2]) >> 1) + dx;
+      txt(cx, b[1] + 13, k === 'approve' ? '放行' : '拦截', 12, rgb(col), 'ma');
+      txt(cx, b[1] + 31, k === 'approve' ? 'APPROVE' : 'DENY', 8, K.DIM, 'ma');
+    }
+  }
+  G.restore();
+}
+
+// 比对模式：整个下方压暗，只留下可点的栏位（和『比对』图标）
+let OVERLAY = null;
 function drawInspect() {
-  darken(0.35, C.INK, [SCREEN[0] + 1, SCREEN[1], SCREEN[2], TASKBAR[1] - 1]);
   const sel = D.insp.sel.map((s) => s.key);
   const hover = fieldAt(ptr.x, ptr.y);
+  const view = [SCREEN[0] + 1, SCREEN[1], SCREEN[2], TASKBAR[1] - 1];
+  const vis = fieldBoxes().filter((f) => !f.w || topWinAt(center(f.box)) === f.w || sel.includes(f.key));
+  // 历史记录整扇窗保持明亮：比对时还要能读当前这段对话
+  const hist = shownWins().filter((w) => w.kind === 'hist').map((w) => {
+    const b = winBox(w);
+    return [Math.max(b[0], view[0]), Math.max(b[1], view[1]), Math.min(b[2], view[2]), Math.min(b[3], view[3])];
+  }).filter((b) => b[2] >= b[0] && b[3] >= b[1]);
+  const holes = vis.map((f) => (f.w ? [Math.max(f.box[0], view[0]), Math.max(f.box[1], view[1]), Math.min(f.box[2], view[2]), Math.min(f.box[3], view[3])] : f.box))
+    .filter((b) => b[2] >= b[0] && b[3] >= b[1]).concat(hist, [INSPECT_ICON]);
+  if (!OVERLAY) OVERLAY = makeCanvas(W, H);
+  const [oc, og] = OVERLAY;
+  og.clearRect(0, 0, W, H);
+  og.fillStyle = rgba(C.INK, 0.62);
+  og.fillRect(LOWER[0], LOWER[1], LOWER[2] - LOWER[0] + 1, LOWER[3] - LOWER[1] + 1);
+  for (const b of holes) og.clearRect(b[0], b[1], b[2] - b[0] + 1, b[3] - b[1] + 1);
+  G.drawImage(oc, 0, 0);
   const mark = (f) => outline(...f.box, sel.includes(f.key) ? K.AMBER : hover && hover.key === f.key ? K.CYAN_L : rgba(C.AMBER, 0.35));
-  const all = fieldBoxes();
-  drawWins();   // 窗口画在压暗层上面
   clipScreen();
-  for (const f of all) if (f.w && (topWinAt(center(f.box)) === f.w || sel.includes(f.key))) mark(f);
+  for (const f of vis) if (f.w) mark(f);
   G.restore();
-  for (const f of all) if (!f.w) mark(f);
+  for (const f of vis) if (!f.w) mark(f);
   if (D.insp.sel.length === 2) {
     const [a, b] = D.insp.sel.map((s) => center(s.box));
     line(a[0], a[1], b[0], b[1], K.AMBER);
   }
-  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '比对：依次点两项信息（证件 / 手册 / 审查窗 / 日期）', 8, K.AMBER);
+  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '比对：依次点两项信息；再点『比对』图标退出', 8, K.AMBER);
 }
 
 function topWinAt([x, y]) {
-  for (const w of [...D.wins].reverse()) if (inBox(x, y, winBox(w))) return w;
+  for (const w of shownWins().reverse()) if (inBox(x, y, winBox(w))) return w;
   return null;
 }
 
 function drawBanner() {
   const b = D.insp.banner;
-  if (!b || (!b.ok && now - b.t > 1.6)) return false;
-  const col = b.ok ? K.RED : K.DIM;
+  if (!b || (b.kind !== 'bad' && now - b.t > 1.6)) return false;
+  const col = b.kind === 'bad' ? K.RED : b.kind === 'ok' ? K.GREEN : K.DIM;
   frame(...BANNER_BOX, col, K.INK);
-  txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 4, b.title, 10, b.ok ? K.RED : K.TEXT);
+  txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 4, b.title, 10, col);
   txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 17, b.sub, 8, K.TEXT);
   const e = D.ent;
   if (b.ok && e && !e.leaving) button(ASK_BTN, e.asked.has(b.issue) ? '已询问' : '询问', K.AMBER, { size: 8, off: e.asked.has(b.issue) });

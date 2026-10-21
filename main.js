@@ -89,7 +89,7 @@ function render() {
   if (ptr.mouse) {
     setCtx(g);
     let cursor = drag ? 'hand' : 'arrow';
-    if (scene === 'desk' && D && D.insp.on && inBox(ptr.x, ptr.y, SCREEN)) cursor = 'cross';
+    if (scene === 'desk' && D && D.insp.on && inBox(ptr.x, ptr.y, LOWER)) cursor = 'cross';
     drawCursor(ptr.x, ptr.y, cursor);
   }
 }
