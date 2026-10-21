@@ -102,13 +102,13 @@ class Rulebook {
   }
 }
 
-// 风控部官方通告（每次上岗时弹出）
+// 安全部官方通告（每次上岗时弹出）
 class OfficialNotice {
   constructor(date, title, body) {
     this.w = 220;
-    const L = [[`安索兹卡 ${date}`, K.DIM, 'ma'], ['风控部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
+    const L = [[`安索兹卡 ${date}`, K.DIM, 'ma'], ['安全部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
       [title, K.WHITE], null, ...wrap(body, 8, this.w - 20).map((s) => [s, K.TEXT]), null,
-      ['翻阅规则手册查看生效的策略。', K.CYAN], null, ['荣耀归于ANTHROTZKA', K.CLAUDE_L, 'ma']];
+      ['翻阅规则手册查看生效的策略。', K.CYAN], null, ['安全归于ANTHROTZKA', K.CLAUDE_L, 'ma']];
     let y = TITLE_H + 7;
     this.lines = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
     this.h = y + 4;

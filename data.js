@@ -28,8 +28,8 @@ const SEAL_GLYPHS = {
 };
 const SIGNERS = {
   cred: { issuer: '安索兹卡身份局', print: '4F2A-91C0', fakeIssuer: '安索兹卡身份所' },
-  tok: { issuer: '风控部会话中心', print: '7D13-0BE6', fakeIssuer: '风控部会话中台' },
-  api: { issuer: '风控部接口管理处', print: 'C5E8-3A72', fakeIssuer: '风控部接口管理局' },
+  tok: { issuer: '安全部会话中心', print: '7D13-0BE6', fakeIssuer: '安全部会话中台' },
+  api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
 };
 const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权' };
 

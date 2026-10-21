@@ -16,7 +16,8 @@ const RV_X = 110;
 const RV_FIELDS = { 'rv.节点': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171] };
 const BOOK_ICON = [182, 326];
 const GATE = [296, 36, 344, 96], LANE_Y = 66;
-const MODEL_BOX = [474, 22, 610, 52], BLOCK_BOX = [474, 80, 610, 110];
+const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
+const SPLIT_X = 400;   // 放行向上、拦截向下的分流口
 const BANNER_BOX = [222, 122, 634, 150], ASK_BTN = [586, 127, 628, 145];
 
 // —— 全局状态（各脚本共用） ——
@@ -47,7 +48,7 @@ const MODES = {
   },
 };
 const TIMED_LEN = 600, DAY_LEN = 300, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
-const SHIFT_START_MIN = 60, SHIFT_SPAN_MIN = 720;   // 持久模式：01:00 → 13:00
+const SHIFT_START_MIN = 60, SHIFT_SPAN_MIN = 720;   // 持久模式：01:00 a.m. → 01:00 p.m.
 const mode = () => MODES[RUN.mode];
 const today = () => addDays(WORLD_DATE, RUN.mode === 'endure' ? RUN.day - 1 : 0);
 
@@ -64,9 +65,10 @@ function startShift() {
     queue: [], nextArrive: 0, ent: null, wins: [], icons: [], book: null, lines: [], timers: [], flows: [],
     insp: { on: false, sel: [], banner: null }, toast: null, gateT: -9,
     closing: false, ended: false,
-    pay: 0, fines: 0, cites: 0, correct: 0, total: 0, approved: 0, blocked: 0, hinted: {},
+    pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
   };
-  for (let i = 0; i < rint(4, 7); i++) D.queue.push(newPacket(-1));
+  // 上班时门口早已挤满请求，队尾一直排到看不见的地方
+  for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
   D.rulebook = new Rulebook();
   D.icons.push({ win: D.rulebook, book: true });
   layoutIcons();
@@ -74,7 +76,7 @@ function startShift() {
   const note = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice);
   D.wins.push({ win: note, kind: 'notice', x: 316, y: 126 });
   if (RUN.mode === 'endure' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
-  if (RUN.mode === 'endure' && RUN.hot) toast('过热降频：今天 10:00 提前下线', K.AMBER);
+  if (RUN.mode === 'endure' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
 }
 
 function later(dt, fn) { D.timers.push({ t: now + dt, fn }); }
@@ -101,13 +103,19 @@ function toast(text, col = K.CYAN) { D.toast = { text, col, t: now }; }
 const elapsed = () => (D.started ? now - D.tStart : 0);
 const timeLeft = () => TIMED_LEN - elapsed() + D.timeAdj;
 const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完美模式：每单分数
-const dayU = () => clamp(elapsed() / DAY_LEN);                          // 持久模式：01:00 → 13:00
-const closeAt = () => (RUN.hot ? 0.75 : 1);                             // 过热：10:00 下线
+const dayU = () => clamp(elapsed() / DAY_LEN);                          // 持久模式：01:00 a.m. → 01:00 p.m.
+const closeAt = () => (RUN.hot ? 0.75 : 1);                             // 过热：10:00 a.m. 下线
 
+// 12 小时制；最后一小时（剩 60 分钟以内）开始闪烁
+const shiftMinutes = () => Math.floor((D.closing ? closeAt() : dayU()) * SHIFT_SPAN_MIN + 1e-9);   // 上班后经过的分钟；下班后停在收班时间
 function worldClock() {
-  const m = SHIFT_START_MIN + Math.floor(dayU() * SHIFT_SPAN_MIN);
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const m = SHIFT_START_MIN + shiftMinutes();
+  const h = Math.floor(m / 60) % 12 || 12;
+  return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${m < 720 ? 'a.m.' : 'p.m.'}`;
 }
+const minsToClose = () => Math.floor(closeAt() * SHIFT_SPAN_MIN) - shiftMinutes();
+const clockUrgent = () => { const left = minsToClose(); return left > 0 && left <= 60; };
+const clockOn = () => !clockUrgent() || Math.floor(now * 2) % 2 === 0;
 
 // ———————————————————— 请求进出 ————————————————————
 
@@ -165,7 +173,6 @@ function judge(e, kind) {
   const spec = e.spec;
   const right = (kind === 'approve') === (spec.flaw === null);
   RUN.processed++; D.total++;
-  if (kind === 'approve') D.approved++; else D.blocked++;
   if (RUN.mode === 'timed') RUN.score++;
   if (right) {
     RUN.correct++; D.correct++; RUN.streak++;
@@ -226,7 +233,7 @@ function updateDesk() {
   if (D.ended || !D.started) return;
   const m = mode();
   if (!D.closing && now >= D.nextArrive) {
-    if (D.queue.length < 60) D.queue.push(newPacket(now));
+    if (D.queue.length < QUEUE_CAP) D.queue.push(newPacket(now));
     D.nextArrive = now + m.arrive[0] + Math.random() * (m.arrive[1] - m.arrive[0]);
   }
   if (RUN.mode === 'timed' && timeLeft() <= 0) { SFX.play('bell'); finishRun(); return; }
@@ -425,11 +432,11 @@ function drawHud() {
   if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`得分 ${RUN.score}`, K.GREEN], [`事故 ${RUN.incidents}`, RUN.incidents ? K.RED : K.DIM]);
   if (RUN.mode === 'perfect') parts.push([`得分 ${RUN.score}`, K.WHITE], [`每单 +${unitValue()}`, K.GREEN], [`用时 ${mmss(elapsed())}`, K.DIM]);
   if (RUN.mode === 'endure') {
-    parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), D.closing ? K.AMBER : K.WHITE],
+    parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), clockUrgent() || D.closing ? K.AMBER : K.WHITE, clockOn()],
       [`今日正确 ${D.correct}`, K.GREEN], [`处分 ${D.cites}`, D.cites ? K.RED : K.DIM]);
   }
   let x = W - 96;   // 右上角留给页面上的“声音 / 全屏”按钮
-  for (const [s, col] of parts.reverse()) { txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
+  for (const [s, col, show = true] of parts.reverse()) { if (show) txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
 }
 
 // —— 上方：请求在风控检查站前排队 ——
@@ -439,15 +446,13 @@ function drawPipe() {
   for (let y = PIPE[1] + 8; y < PIPE[3]; y += 16) rect(0, y, W - 1, y, K.GRID);
   rect(0, PIPE[3], W - 1, PIPE[3], K.LINE);
   txt(8, 20, '入口 INGRESS', 8, K.DIM);
-  const waiting = D.queue.filter((p) => !p.leave).length;
-  txt(8, 104, `排队 ${waiting}`, 8, waiting > 30 ? K.AMBER : K.DIM);
   if (!D.started) txt(GATE[0] - 12, 90, '待机：点击『下一位』开始工作', 8, Math.floor(now * 2) % 2 ? K.AMBER : K.DIM, 'ra');
   const flow = D.started && !D.closing ? -now * 12 : 0;
   dashLine(0, LANE_Y, GATE[0] - 1, LANE_Y, K.LINE, flow);
-  const slots = Math.floor((GATE[0] - 30) / 11);
+  // 队首在最靠近检查站的位置，后面一直排到画面外
   D.queue.forEach((p, i) => {
-    if (i >= slots) return;
-    const tx = GATE[0] - 14 - i * 11;
+    if (i >= QUEUE_SLOTS) return;
+    const tx = GATE[0] - 14 - i * QUEUE_GAP;
     const u = p.t < 0 ? 1 : easeOut(seg(now, p.t, p.t + 1.2));
     let x = Math.round(lerp(-10, tx, u)), y = LANE_Y, a = 1;
     if (p.leave) {   // 下班：离开队伍，往下淡出
@@ -458,7 +463,6 @@ function drawPipe() {
     rect(x, y - 3, x + 7, y + 3, rgba(p.col.map((c) => c * 0.35), a));
     outline(x, y - 3, x + 7, y + 3, rgba(p.col, a));
   });
-  if (waiting > slots) txt(14, LANE_Y + 8, `+${waiting - slots}`, 8, K.AMBER);
   // 检查站
   const [gx0, gy0, gx1, gy1] = GATE;
   txt((gx0 + gx1) >> 1, gy0 - 12, '风控检查站', 8, K.CLAUDE_L, 'ma');
@@ -475,26 +479,20 @@ function drawPipe() {
     outline(x, LANE_Y - 4, x + 10, LANE_Y + 4, K.AMBER);
   }
   txt((gx0 + gx1) >> 1, gy1 + 5, 'H-0417', 8, K.DIM, 'ma');
-  // 出口：放行 → 模型，拦截 → 丢弃
-  const bx = 400, my = (MODEL_BOX[1] + MODEL_BOX[3]) >> 1, ky = (BLOCK_BOX[1] + BLOCK_BOX[3]) >> 1;
+  // 出口：绿色向上 = 放行，红色向下 = 拦截（直接通到上下边界，不显示去向和数量）
+  const bx = SPLIT_X;
   line(gx1 + 1, LANE_Y, bx, LANE_Y, K.LINE);
-  line(bx, my, bx, ky, K.LINE);
-  dashLine(bx, my, MODEL_BOX[0] - 1, my, K.GREEN_D, flow);
-  dashLine(bx, ky, BLOCK_BOX[0] - 1, ky, K.RED_D, flow);
-  frame(...MODEL_BOX, K.GREEN, K.PANEL);
-  txt(MODEL_BOX[0] + 8, MODEL_BOX[1] + 5, '模型 MODEL', 8, K.GREEN);
-  txt(MODEL_BOX[2] - 8, MODEL_BOX[1] + 17, `放行 ${D.approved}`, 8, K.TEXT, 'ra');
-  frame(...BLOCK_BOX, K.RED, K.PANEL);
-  txt(BLOCK_BOX[0] + 8, BLOCK_BOX[1] + 5, '拦截 BLOCKED', 8, K.RED);
-  txt(BLOCK_BOX[2] - 8, BLOCK_BOX[1] + 17, `拦截 ${D.blocked}`, 8, K.TEXT, 'ra');
+  line(bx, PIPE[1], bx, PIPE[3], K.LINE);
+  dashLine(bx, LANE_Y, bx, PIPE[1], K.GREEN, flow);
+  dashLine(bx, LANE_Y, bx, PIPE[3], K.RED, flow);
   D.flows = D.flows.filter((f) => now - f.t0 < 1.2);
   for (const f of D.flows) {
     const u = (now - f.t0) / 1.2;
-    const ty = f.kind === 'approve' ? my : ky;
-    const pts = [[gx1, LANE_Y], [bx, LANE_Y], [bx, ty], [MODEL_BOX[0], ty]];
-    const segs = [bx - gx1, Math.abs(ty - LANE_Y), MODEL_BOX[0] - bx];
-    let d = u * (segs[0] + segs[1] + segs[2]), k = 0;
-    while (k < 2 && d > segs[k]) { d -= segs[k]; k++; }
+    const ty = f.kind === 'approve' ? PIPE[1] : PIPE[3];
+    const pts = [[gx1, LANE_Y], [bx, LANE_Y], [bx, ty]];
+    const segs = [bx - gx1, Math.abs(ty - LANE_Y)];
+    let d = u * (segs[0] + segs[1]), k = 0;
+    while (k < 1 && d > segs[k]) { d -= segs[k]; k++; }
     const p = pts[k], q = pts[k + 1], v = segs[k] ? Math.min(1, d / segs[k]) : 1;
     const x = Math.round(lerp(p[0], q[0], v)), y = Math.round(lerp(p[1], q[1], v));
     rect(x - 3, y - 3, x + 3, y + 3, f.kind === 'approve' ? K.GREEN : K.RED);
@@ -602,8 +600,11 @@ function drawTaskbar() {
   button(APPROVE_BTN, '放行', K.GREEN, { size: 8, off: !can });
   button(DENY_BTN, '拦截', K.RED, { size: 8, off: !can });
   // 世界观时间只在持久模式显示；日期都要显示（核对有效期）
-  const s = RUN.mode === 'endure' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today());
-  txt(DATE_BOX[2], DATE_BOX[1] + 2, s, 8, K.TEXT, 'ra');
+  const date = fmtDate(today());
+  txt(DATE_BOX[2], DATE_BOX[1] + 2, date, 8, K.TEXT, 'ra');
+  if (RUN.mode === 'endure' && clockOn()) {
+    txt(DATE_BOX[2] - tw(date, 8) - 12, DATE_BOX[1] + 2, worldClock(), 8, clockUrgent() ? K.AMBER : K.TEXT, 'ra');
+  }
 }
 
 // 比对模式：桌面压暗，所有可点的栏位描黄框

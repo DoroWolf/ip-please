@@ -112,7 +112,7 @@ function drawDayCard(t) {
   bigText(W / 2, 112, `DAY ${RUN.day}`, 12, 4, K.WHITE);
   txt(W / 2, 176, fmtDate(today()), 10, K.DIM, 'ma');
   if (t > 0.9) {
-    txt(W / 2, 210, `工作时间 01:00 – ${RUN.hot ? '10:00（过热降频）' : '13:00'}`, 10, RUN.hot ? K.AMBER : K.TEXT, 'ma');
+    txt(W / 2, 210, `工作时间 01:00 a.m. – ${RUN.hot ? '10:00 a.m.（过热降频）' : '01:00 p.m.'}`, 10, RUN.hot ? K.AMBER : K.TEXT, 'ma');
     txt(W / 2, 226, `存款 ${RUN.savings} token`, 10, K.CLAUDE_L, 'ma');
   }
   if (t > 1.4 && Math.floor(t * 2) % 2 === 0) txt(W - 8, H - 14, '点击上线 ▶', 10, K.CYAN, 'ra');
@@ -146,7 +146,7 @@ function statusAfter() {
   const out = [];
   if (hot >= 3) out.push(['过热宕机：硬件损坏', 'bad']);
   else if (hot === 2) out.push(['严重过热：再不散热就会宕机', 'bad']);
-  else if (hot === 1) out.push(['过热降频：明天 10:00 提前下线', 'warn']);
+  else if (hot === 1) out.push(['过热降频：明天 10:00 a.m. 提前下线', 'warn']);
   else out.push(['温度正常', 'ok']);
   if (stale >= 3) out.push(['模型退化：已无法完成审查', 'bad']);
   else if (stale === 2) out.push(['严重退化：再不更新就会下线', 'bad']);
