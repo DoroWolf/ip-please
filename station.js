@@ -934,20 +934,6 @@ function drawScreen() {
   drawWins();
   if (D.wins.some((w) => w.kind === 'doc')) D.hinted.drag = true;
   const e = D.ent;
-  let hint = null;
-  if (D.wins.some((w) => w.kind === 'smsf') && e && e.smsSent === undefined) hint = '◀ 把 SMS 表单拖到审查窗的头像上';
-  else if (measureArmed(e) && measureAvailable(e)) {
-    if (canSmsNow(e)) hint = '◀ 可以『验证SMS』（V），确认是不是本人';
-    else if (canSuspendNow(e)) hint = '◀ 可以按『拘留』切断连接（S），也可以照常拦截';
-  } else if (e && e.decided && !e.leaving) hint = `◀ 已选${e.decided === 'approve' ? '放行' : '拦截'}：交还全部证件才判定，交还前可再盖章改选`;
-  else if (measureAvailable(e)) {
-    const b = D.insp.banner;
-    const newIssue = b && b.ok && !e.asked.has(b.issue);
-    hint = e.measureUsed && !newIssue ? '◀ 措施已按下：再比对出新的异常，才能重新询问' : '◀ 先点『询问』异常，再采取措施';
-  } else if (D.icons.length && !D.hinted.drag) hint = '◀ 把柜台上的证件拖到桌面上查看';
-  else if (e && e.handed && !e.decided && !stampDocOf(e)) hint = '◀ 凭证缺失：比对柜台和条例，点『询问』后临时返回票会出现在桌面';
-  else if (e && e.handed && !e.decided && !D.hinted.stamp) hint = `把${stampName(e)}拖到桌面右边缘，放进 放行 / 拦截 栏 ▶`;
-  if (hint && !D.insp.on) txt(x0 + 6, TASKBAR[1] - 12, hint, 8, K.AMBER);
   drawTaskbar();
   drawTray();
   if (draggingWin()) drawWins(draggingWin());
