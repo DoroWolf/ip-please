@@ -81,6 +81,18 @@ python tools/build_assets.py
 
 本地预览：在仓库根目录运行 `python -m http.server`，打开 <http://localhost:8000>。
 
+## 部署到 GitHub Pages
+
+推送到 `main` 后，由 `.github/workflows/pages.yml` 自动把游戏发布到 GitHub Pages（只上传 `index.html`、各 `*.js`、`media/` 等运行必需的文件，不含 `tools/`）。
+
+首次部署前需要手动开一次开关：
+
+1. 仓库 **Settings → Pages → Build and deployment**，把 **Source** 设为 **GitHub Actions**。
+2. 到 **Actions → Deploy to GitHub Pages → Run workflow** 手动跑一次（也可以再推一次 `main` 触发）。
+3. 完成后访问 `https://<用户名>.github.io/ip-please/`。
+
+游戏全部使用相对路径，部署在子路径下也能正常运行。
+
 ## 致谢与许可
 
 - 致敬 Lucas Pope 的《Papers, Please》。角色和机构均为虚构。
