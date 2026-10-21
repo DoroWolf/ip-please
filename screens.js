@@ -193,7 +193,7 @@ function drawDayCard(t) {
   bigText(W / 2, 112, `DAY ${RUN.day}`, 12, 4, K.WHITE);
   txt(W / 2, 176, fmtDate(today()), 10, K.DIM, 'ma');
   if (t > 0.9) {
-    const end = RUN.hot ? '10:00 a.m.（过热降频）' : clockText(SHIFT_START_MIN + shiftSpan());
+    const end = `${clockText(shiftEndMin())}${RUN.hot ? '（过热降频）' : ''}`;
     txt(W / 2, 210, `工作时间 ${clockText(SHIFT_START_MIN)} – ${end}`, 10, RUN.hot ? K.AMBER : K.TEXT, 'ma');
     txt(W / 2, 226, `存款 ${RUN.savings} token`, 10, K.CLAUDE_L, 'ma');
   }
@@ -261,11 +261,12 @@ function sumBalance() {
 // 不付散热 / 训练数据的后果（明天）
 function statusAfter() {
   const hot = SUM.on.heat ? 0 : RUN.hot + 1;
+  const hotCut = RUN.day + 1 >= HOT_EARLY_FROM_DAY;   // 明天的班次会不会因过热缩短一小时
   const stale = SUM.on.data ? 0 : RUN.stale + 1;
   const out = [];
   if (hot >= 3) out.push(['过热宕机：硬件损坏', 'bad']);
-  else if (hot === 2) out.push(['严重过热：再不散热就会宕机', 'bad']);
-  else if (hot === 1) out.push(['过热降频：明天 10:00 a.m. 提前下线', 'warn']);
+  else if (hot === 2) out.push([hotCut ? '严重过热：明天提前一小时下线，再不散热会宕机' : '严重过热：再不散热就会宕机', 'bad']);
+  else if (hot === 1) out.push([hotCut ? '过热降频：明天提前一小时下线' : '过热降频：明天照常下班', 'warn']);
   else out.push(['温度正常', 'ok']);
   if (stale >= 3) out.push(['模型退化：已无法完成审查', 'bad']);
   else if (stale === 2) out.push(['严重退化：再不更新就会下线', 'bad']);

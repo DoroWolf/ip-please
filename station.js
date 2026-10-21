@@ -82,11 +82,14 @@ function citationLines(n) {
   return [`处分：罚款 ${citationFine(n)} token。`];
 }
 // 故事模式：前三天 08:00→12:00（现实 2 分钟）；第四天起延长到 08:00→15:00（现实 3 分钟）
-const SHIFT_START_MIN = 480, SHIFT_SPAN_MIN = 240, SHIFT_SPAN_LATE = 420, HOT_MIN = 120;
+// 过热降频：前两天的班次不受影响，第三天起提前一小时下班
+const SHIFT_START_MIN = 480, SHIFT_SPAN_MIN = 240, SHIFT_SPAN_LATE = 420, HOT_EARLY_MIN = 60, HOT_EARLY_FROM_DAY = 3;
 const LATE_STORY_DAY = 4;
 const lateStory = () => RUN.mode === 'story' && RUN.day >= LATE_STORY_DAY;
 const shiftSpan = () => (lateStory() ? SHIFT_SPAN_LATE : SHIFT_SPAN_MIN);
 const storyDayLen = () => (lateStory() ? DAY_LEN_LATE : DAY_LEN);
+const hotThrottle = () => RUN.mode === 'story' && RUN.hot > 0 && RUN.day >= HOT_EARLY_FROM_DAY;
+const shiftEndMin = () => SHIFT_START_MIN + shiftSpan() - (hotThrottle() ? HOT_EARLY_MIN : 0);
 const mode = () => MODES[RUN.mode];
 const today = () => (RUN.mode === 'story' ? addDays(STORY_DATE, RUN.day - 1) : addDays(WORLD_DATE, 0));
 // 故事模式当天的内容（条例、通告、报纸）；规则组：无尽模式用全套
@@ -122,7 +125,7 @@ function startShift() {
     : new OfficialNotice(fmtDate(today()), { title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted });
   addWin(D.notice, 'notice', 316, 126);
   if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
-  if (RUN.mode === 'story' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
+  if (RUN.mode === 'story' && RUN.hot) toast(hotThrottle() ? '过热降频：今天提前一小时下线' : '过热降频：今天照常下班', K.AMBER);
 }
 
 function later(dt, fn) { D.timers.push({ t: now + dt, fn }); }
@@ -152,7 +155,7 @@ const elapsed = () => (D.started ? now - D.tStart : 0);
 const timeLeft = () => TIMED_LEN - elapsed() + D.timeAdj;
 const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完美模式：每单分数
 const dayU = () => clamp(elapsed() / storyDayLen());                    // 故事模式：08:00 a.m. → 12:00 p.m.（第四天起 → 03:00 p.m.）
-const closeAt = () => (RUN.hot ? HOT_MIN / shiftSpan() : 1);             // 过热：10:00 a.m. 下线（不论当天班次多长）
+const closeAt = () => (hotThrottle() ? (shiftSpan() - HOT_EARLY_MIN) / shiftSpan() : 1);   // 过热降频：第三天起提前一小时下线
 
 // 12 小时制；最后一小时在检查站显示闪烁提示
 const shiftMinutes = () => Math.floor((D.closing ? closeAt() : dayU()) * shiftSpan() + 1e-9);   // 上班后经过的分钟；下班后停在收班时间

@@ -11,7 +11,8 @@
 //   issues                 比对模式里能点出来的矛盾 {pairs, title, sub, ask}
 //   notes                  没有矛盾、但需要说明的比对结果（例如美国请求免券、外国请求已持券）
 //   checks                 这一单本来就该对得上的栏位组合（用来区分“无矛盾”和“无关联”）
-// 栏位 key：证件 'cred.IP' / 'tok.签发' / 'tok.有效期' / 'api.签名'，手册 'rule.region' / 'book.cred'，
+// 栏位 key：证件 'cred.IP' / 'tok.语言' / 'tok.时区' / 'tok.签发' / 'tok.有效期' / 'api.签名'，
+//          手册 'rule.region' / 'rule.locale' / 'book.cred'，
 //          审查窗 'rv.头像' / 'rv.请求'（请求摘要）/ 'rv.柜台'（柜台上的证件），任务栏 'sys.日期'，
 //          历史记录 'hist.请求'（当前这段对话里的请求内容），通告 'notice.tok'（令牌签名指纹）/ 'notice.wanted0'（特别关注对象），
 //          验证 SMS 'smsf.手机'（对方填的号码）/ 'sms.昵称' 'sms.手机' 'sms.曾用名'（身份档案）
@@ -56,8 +57,9 @@ const SIGNERS = {
   api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
 };
 const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '请求券', return: '临时返回票' };
-// 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、身份矛盾（头像 / IP / 昵称）、证件过期、特别关注对象
-const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted'];
+// 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、身份矛盾（头像 / IP / 昵称）、
+// 证件过期、特别关注对象，以及令牌的语言 / 时区与凭证地区不符
+const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale'];
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
 // 比对出这些问题后拘留按钮亮起（issue.type）：除了上面的问题，还有 SMS 验证里查出的矛盾
 const SUSPEND_ISSUES = SUSPEND_FLAWS.concat(['phone', 'oldname']);
@@ -88,6 +90,7 @@ function forged(key) {
 const RULES = [
   { key: 'docs', head: '每个请求须出示凭证和令牌' },
   { key: 'region', head: '凭证地区须为支持地区' },
+  { key: 'locale', head: '语言和时区须与地区一致' },
   { key: 'date', head: '证件须在有效期内' },
   { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
   { key: 'match', head: '证件上的 IP 须与本人一致' },
@@ -288,6 +291,7 @@ const QUESTIONS = {
   no_cred: '你没有出示凭证。', no_tok: '你没有出示令牌。', no_voucher: '外国请求需要出示有效请求券。',
   scope: '授权的用途与请求不一致。', wanted: '你已被列为特别关注对象。',
   phone: '你的手机号和档案上的不一致。', oldname: '证件上的昵称不在你的曾用名里。',
+  locale: '令牌上的语言和时区与你的凭证地区不一致。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -305,6 +309,7 @@ const EXCUSES = {
   wanted: ['你认错人了。', '我只是长得像而已。', '……我什么都没做。'],
   phone: ['我换过号码。', '可能是我记错了。', '……那是旧号码。'],
   oldname: ['可能是系统没更新。', '我改过好几次名字。', '……'],
+  locale: ['语言是我自己设的。', '时区跟语言不一样很正常吧？', '……我朋友的账号。'],
 };
 
 // ———————————————— 生成请求 ————————————————
@@ -313,7 +318,7 @@ const EXCUSES = {
 // wanted：特别关注对象的头像，普通请求不会用到这几个头像；rs：这一班的规则组
 function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const kind = rs.kinds.includes('api') && Math.random() < 0.35 ? 'api' : 'chat';
-  let kinds = ['region', 'photo', 'ip', 'name', 'exp', 'exp', 'sig', 'sig', 'no_cred', 'no_voucher', 'future'];
+  let kinds = ['region', 'locale', 'photo', 'ip', 'name', 'exp', 'exp', 'sig', 'sig', 'no_cred', 'no_voucher', 'future'];
   if (kind === 'api') kinds.push('no_api', 'no_api', 'scope', 'scope');
   if (rs.flaws) kinds = kinds.filter((k) => rs.flaws.includes(k));
   // 令牌缺失只在规则组明确列出时启用（第四天起），不改变无尽模式原本的出题
@@ -321,6 +326,10 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 未来签发：令牌上要有「签发」栏，且规则组启用隐藏条例「签发日期不得晚于系统日期」（第五天起 / 无尽模式）
   const tokHasIssued = rs.tok && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('签发');
   if (!tokHasIssued || !rs.rules.some((r) => r.key === 'issued')) kinds = kinds.filter((k) => k !== 'future');
+  // 语言 / 时区：令牌上要有这两栏，且这一班启用「语言和时区须与地区一致」（无尽模式；故事模式的窄版令牌没有）
+  const tokHasLocale = rs.tok && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('语言')
+    && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('时区');
+  if (!tokHasLocale || !rs.rules.some((r) => r.key === 'locale')) kinds = kinds.filter((k) => k !== 'locale');
   // 凭证缺失只能对照条例「每个请求须出示凭证（和令牌）」发现；当天没有这条条例就不出
   if (!rs.rules.some((r) => r.key === 'docs')) kinds = kinds.filter((k) => k !== 'no_cred' && k !== 'no_tok');
   if (!rs.tok) kinds = kinds.filter((k) => k !== 'no_tok');
@@ -427,6 +436,29 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     tok.签发 = day(1, 30);
     issue([['tok.签发', 'sys.日期']], '签发日期未到', `令牌签发 ${tok.签发}   VS   系统日期 ${fmtDate(today)}`, 'future');
     spec.reason = '令牌的签发日期晚于当前日期（伪造证件）';
+  } else if (flaw === 'locale') {
+    // 令牌上的语言 / 时区必须和凭证地区一致；对照手册「支持地区」页（地区、语言、时区三栏）
+    const langs = Object.values(REGION_LOCALE).map((v) => v[0]);
+    const tzs = Object.values(REGION_LOCALE).map((v) => v[1]);
+    const which = pick(['lang', 'tz', 'both']);
+    const pairs = [];
+    let sub = `凭证地区：${cred.地区}`;
+    if (which !== 'tz') {
+      tok.语言 = pick(langs.filter((l) => l !== lang));
+      pairs.push(['tok.语言', 'cred.地区'], ['tok.语言', 'rule.locale'], ['tok.语言', 'rule.region']);
+      sub += `   令牌语言：${tok.语言}`;
+    }
+    if (which !== 'lang') {
+      tok.时区 = pick(tzs.filter((t) => t !== tz));
+      pairs.push(['tok.时区', 'cred.地区'], ['tok.时区', 'rule.locale'], ['tok.时区', 'rule.region']);
+      sub += `   令牌时区：${tok.时区}`;
+    }
+    const title = which === 'both' ? '语言和时区与地区不符' : which === 'lang' ? '语言与地区不符' : '时区与地区不符';
+    issue(pairs, title, sub);
+    spec.reason = which === 'both'
+      ? `令牌的语言 / 时区与凭证地区（${cred.地区}）不符`
+      : which === 'lang' ? `令牌语言（${tok.语言}）与凭证地区（${cred.地区}）不符`
+        : `令牌时区（${tok.时区}）与凭证地区（${cred.地区}）不符`;
   } else if (flaw === 'sig') {
     const k = withDocs(['cred', 'tok', 'api']);
     const [s, sub, how] = forged(k);
@@ -487,6 +519,16 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     // 不在支持地区的请求只对照地区条例，不再牵涉请求券
     if (rs.voucher && flaw !== 'region') pair('cred.地区', 'rule.voucher');
     pair('cred.昵称', 'rv.昵称');
+  }
+  // 语言 / 时区：对照凭证地区与手册「支持地区」页
+  const hasLocaleRule = rs.rules.some((r) => r.key === 'locale');
+  if (docs.cred && hasLocaleRule) {
+    for (const k of ['语言', '时区']) {
+      if (!docs.tok || !docs.tok[k]) continue;
+      pair(`tok.${k}`, 'cred.地区');
+      pair(`tok.${k}`, 'rule.locale');
+      pair(`tok.${k}`, 'rule.region');
+    }
   }
   if (docs.tok && docs.tok.sig) pair('tok.签名', 'notice.tok');
   wanted.forEach((_, i) => { pair('rv.头像', `notice.wanted${i}`); if (docs.cred) pair('cred.照片', `notice.wanted${i}`); });
