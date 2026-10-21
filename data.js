@@ -52,12 +52,12 @@ function forged(key) {
 
 // —— 规则手册 ——
 const RULES = [
-  { key: 'docs', head: '§1 每个请求须出示凭证和令牌' },
-  { key: 'region', head: '§2 凭证地区须为支持地区', subs: ['支持：美国  英国  日本  德国  新加坡'] },
-  { key: 'date', head: '§3 证件须在有效期内', subs: ['以任务栏上的系统日期为准（当天到期仍有效）'] },
-  { key: 'match', head: '§4 证件须与节点本人一致', subs: ['头像、节点编号、昵称'] },
-  { key: 'api', head: '§5 API 调用须另出示 API 授权' },
-  { key: 'sig', head: '§6 证件须有合法的数字签名', subs: ['签发机构、指纹、图案见第 2 页'] },
+  { key: 'docs', head: '每个请求须出示凭证和令牌' },
+  { key: 'region', head: '凭证地区须为支持地区' },
+  { key: 'date', head: '证件须在有效期内' },
+  { key: 'match', head: '证件须与节点本人一致' },
+  { key: 'api', head: 'API 调用须另出示 API 授权' },
+  { key: 'sig', head: '证件须有合法的数字签名' },
 ];
 
 // ———————————————— 工具 ————————————————

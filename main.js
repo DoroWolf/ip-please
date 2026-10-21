@@ -12,6 +12,12 @@ function go(name) {
   if (name === 'desk') startShift();
 }
 
+// 黑屏转场：先压黑，再切场景
+let fade = null;
+function fadeGo(name, dur = 0.45) {
+  if (!fade) fade = { t0: now, to: name, dur };
+}
+
 // ———————————————————— 输入 ————————————————————
 
 function toGame(ev) {
@@ -25,6 +31,7 @@ function onDown(ev) {
   Object.assign(ptr, { x, y, down: true, mouse: ev.pointerType === 'mouse' });
   if (canvasEl.setPointerCapture) canvasEl.setPointerCapture(ev.pointerId);
   ev.preventDefault();
+  if (fade) return;
   if (scene === 'desk') deskDown(x, y);
   else sceneClick(x, y);
 }
@@ -44,13 +51,14 @@ function onUp(ev) {
 function onKey(e) {
   const k = e.key.toLowerCase();
   if (k === 'm') { toggleMute(); return; }
+  if (fade) return;
   if (scene === 'desk') { if (k === ' ') e.preventDefault(); deskKey(k); }
 }
 
 function sceneClick(x, y) {
   if (scene === 'boot') { go('title'); return; }
   if (scene === 'title') { titleClick(x, y); return; }
-  if (scene === 'daycard' && st() > 0.8) { go('desk'); return; }
+  if (scene === 'daycard' && st() > 0.8) { fadeGo('desk'); return; }
   if (scene === 'summary') { summaryClick(x, y); return; }
   if (scene === 'result') resultClick(x, y);
 }
@@ -58,6 +66,7 @@ function sceneClick(x, y) {
 // ———————————————————— 主循环 ————————————————————
 
 function update() {
+  if (fade && now - fade.t0 >= fade.dur) { const to = fade.to; fade = null; go(to); }
   if (scene === 'desk') updateDesk();
   if (scene === 'boot') { bootSounds(); if (BOOT_LINES && st() > BOOT_LINES.end) go('title'); }
 }
@@ -71,6 +80,7 @@ function render() {
   else if (scene === 'desk') drawDesk();
   else if (scene === 'summary') drawSummary(t);
   else if (scene === 'result') drawResult(t);
+  if (fade) darken(seg(now, fade.t0, fade.t0 + fade.dur));
 
   const g = canvasEl.getContext('2d');
   g.imageSmoothingEnabled = false;

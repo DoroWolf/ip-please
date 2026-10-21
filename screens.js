@@ -1,16 +1,16 @@
 'use strict';
-// 检查站以外的画面：开机、标题（选模式）、持久模式的日期卡和下班结算、结束画面。
+// 检查站以外的画面：开机、标题（选模式）、故事模式的日期卡和下班结算、结束画面。
 
-const RECORD_KEY = 'ip-please-records-v3';
+const RECORD_KEY = 'ip-please-records-v4';
 
 function loadRecords() {
   try { return JSON.parse(localStorage.getItem(RECORD_KEY) || '{}'); } catch (e) { return {}; }
 }
 
-// 各模式只记最好成绩：限时 / 完美 = 分数，持久 = 天数
+// 各模式只记最好成绩：限时 / 完美 / 持久 = 分数，故事 = 天数
 function saveRecord() {
   const r = loadRecords();
-  const v = RUN.mode === 'endure' ? RUN.day : RUN.score;
+  const v = RUN.mode === 'story' ? RUN.day : RUN.score;
   RUN.best = r[RUN.mode] || 0;
   RUN.newBest = v > RUN.best;
   if (RUN.newBest) {
@@ -19,7 +19,7 @@ function saveRecord() {
   }
 }
 
-const recordLabel = (m, v) => (m === 'endure' ? `最佳：撑到 DAY ${v}` : `最佳：${v} 分`);
+const recordLabel = (m, v) => (m === 'story' ? `最佳：撑到 DAY ${v}` : `最佳：${v} 分`);
 
 // ———————————————————— 开机 ————————————————————
 
@@ -68,6 +68,7 @@ function bootSounds() {
 
 // ———————————————————— 标题：选模式 ————————————————————
 
+// 标题上只开放这三种；故事模式（story）等剧情内容做好再放出来
 const MODE_CARDS = { timed: [40, 150, 220, 300], perfect: [230, 150, 410, 300], endure: [420, 150, 600, 300] };
 
 function drawTitle(t) {
@@ -75,7 +76,6 @@ function drawTitle(t) {
   for (let x = 8; x < W; x += 16) for (let y = 8; y < H; y += 16) pt(x, y, K.LINE);
   spr('title_emblem', 297, 18);
   bigText(W / 2, 74, 'IP, PLEASE', 12, 4, K.WHITE, K.INK);
-  txt(W / 2, 128, '风控检查站 · RISK CONTROL', 10, K.CYAN, 'ma');
   if (t < 0.4) return;
   const rec = loadRecords();
   for (const [m, box] of Object.entries(MODE_CARDS)) {
@@ -101,10 +101,10 @@ function titleClick(x, y) {
   if (!m) return;
   SFX.play('accept');
   newRun(m);
-  go(m === 'endure' ? 'daycard' : 'desk');
+  fadeGo(m === 'story' ? 'daycard' : 'desk');
 }
 
-// ———————————————————— 持久模式：日期卡 ————————————————————
+// ———————————————————— 故事模式：日期卡 ————————————————————
 
 function drawDayCard(t) {
   rect(0, 0, W - 1, H - 1, K.INK);
@@ -119,7 +119,7 @@ function drawDayCard(t) {
   scanlines(0, 0, W - 1, H - 1, 0.15);
 }
 
-// ———————————————————— 持久模式：下班结算 ————————————————————
+// ———————————————————— 故事模式：下班结算 ————————————————————
 
 let SUM = null;
 const CONTINUE_BTN = [430, 318, 620, 344];
@@ -230,14 +230,15 @@ function summaryClick(x, y) {
 function drawResult(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
   const m = RUN.mode;
-  const title = m === 'timed' ? '时间到' : m === 'perfect' ? '完美模式结束' : '节点停机';
+  const title = m === 'timed' ? '时间到' : m === 'perfect' ? '完美模式结束' : m === 'endure' ? '分数为负' : '节点停机';
   bigText(W / 2, 40, title, 12, 3, m === 'timed' ? K.CYAN_L : K.RED);
   if (t < 0.5) return;
   let y = 100;
   const row = (a, b, col = K.WHITE) => { txt(220, y, a, 12, K.DIM); txt(420, y, b, 12, col, 'ra'); y += 18; };
   if (m === 'timed') { row('得分', `${RUN.score}`, K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); row('事故', `${RUN.incidents}`, RUN.incidents ? K.RED : K.WHITE); }
   if (m === 'perfect') { row('得分', `${RUN.score}`, K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); }
-  if (m === 'endure') { row('坚持天数', `${RUN.day}`, K.CLAUDE_L); row('累计正确', `${RUN.correct}`, K.GREEN); row('累计事故', `${RUN.incidents}`); }
+  if (m === 'endure') { row('得分', `${RUN.score}`, RUN.score < 0 ? K.RED : K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); row('事故', `${RUN.incidents}`, RUN.incidents ? K.RED : K.WHITE); }
+  if (m === 'story') { row('坚持天数', `${RUN.day}`, K.CLAUDE_L); row('累计正确', `${RUN.correct}`, K.GREEN); row('累计事故', `${RUN.incidents}`); }
   if (RUN.fail) { y += 6; RUN.fail.forEach((s) => { txt(W / 2, y, s, 10, K.RED, 'ma'); y += 14; }); }
   if (t > 1.0) {
     if (RUN.newBest || RUN.best) txt(W / 2, 262, RUN.newBest ? '新纪录！' : recordLabel(m, RUN.best), 12, RUN.newBest ? K.AMBER : K.DIM, 'ma');
@@ -249,6 +250,6 @@ function drawResult(t) {
 
 function resultClick(x, y) {
   if (st() < 1.0) return;
-  if (inBox(x, y, RESTART_BTN)) { const m = RUN.mode; newRun(m); go(m === 'endure' ? 'daycard' : 'desk'); }
-  if (inBox(x, y, MENU_BTN)) go('title');
+  if (inBox(x, y, RESTART_BTN)) { const m = RUN.mode; newRun(m); fadeGo(m === 'story' ? 'daycard' : 'desk'); }
+  if (inBox(x, y, MENU_BTN)) fadeGo('title');
 }

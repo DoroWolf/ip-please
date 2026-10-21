@@ -15,9 +15,9 @@ const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
 const RV_FIELDS = { 'rv.节点': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171] };
 const BOOK_ICON = [182, 326];
-const GATE = [296, 36, 344, 96], LANE_Y = 66;
+const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
-const SPLIT_X = 400;   // 放行向上、拦截向下的分流口
+const SPLIT_X = 512;   // 放行向上、拦截向下的分流口（右侧道路拉长后再分叉）
 const BANNER_BOX = [222, 122, 634, 150], ASK_BTN = [586, 127, 628, 145];
 
 // —— 全局状态（各脚本共用） ——
@@ -26,10 +26,10 @@ const ptr = { x: 320, y: 180, mouse: false, down: false };
 let drag = null;
 let scene = 'boot', sceneT0 = 0;
 const st = () => now - sceneT0;
-let RUN = null;              // 这一局（持久模式跨天）
-let D = null;                // 这一班（限时 / 完美模式整局只有一班；持久模式一天一班）
+let RUN = null;              // 这一局（故事模式跨天）
+let D = null;                // 这一班（限时 / 完美 / 持久模式整局只有一班；故事模式一天一班）
 
-// —— 三种无尽模式 ——
+// —— 模式定义（标题上开放限时 / 完美 / 持久；故事模式暂不开放） ——
 const MODES = {
   timed: {
     name: '限时模式', en: 'TIME ATTACK', desc: ['10 分钟内处理尽可能多的请求。', '每次事故损失 30 秒。'],
@@ -41,6 +41,12 @@ const MODES = {
     notice: '通过处理请求来得分，不允许出事。第一分钟内每个请求得十分，之后每过一分钟递减一分。注意提高工作效率。',
     arrive: [2.5, 5], pBad: 0.5, pace: 0.8,
   },
+  // 故事模式：每天 + token 经济。剧情内容还没做好，先不在标题画面开放。
+  story: {
+    name: '故事模式', en: 'STORY', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
+    notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
+    arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
+  },
   endure: {
     name: '持久模式', en: 'ENDURANCE', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
     notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
@@ -48,12 +54,24 @@ const MODES = {
   },
 };
 const TIMED_LEN = 600, DAY_LEN = 300, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
-const SHIFT_START_MIN = 60, SHIFT_SPAN_MIN = 720;   // 持久模式：01:00 a.m. → 01:00 p.m.
+const SCORE_UP = 1, SCORE_DOWN = 5;                 // 持久模式：正确 +1，失误 -5
+
+// 事故处分单（三个模式统一）：第 1 次警告、第 2 次最后警告、第 3／4 次罚 5 token，之后每次 +5
+function citationFine(n) {
+  return n <= 2 ? 0 : FINE_STEP * Math.max(1, n - 3);
+}
+
+function citationLines(n) {
+  if (n === 1) return ['处分：予以警告，暂不处分。'];
+  if (n === 2) return ['处分：最后警告，暂不处分。'];
+  return [`处分：罚款 ${citationFine(n)} token。`];
+}
+const SHIFT_START_MIN = 60, SHIFT_SPAN_MIN = 720;   // 故事模式：01:00 a.m. → 01:00 p.m.
 const mode = () => MODES[RUN.mode];
-const today = () => addDays(WORLD_DATE, RUN.mode === 'endure' ? RUN.day - 1 : 0);
+const today = () => addDays(WORLD_DATE, RUN.mode === 'story' ? RUN.day - 1 : 0);
 
 function newRun(m) {
-  RUN = { mode: m, correct: 0, incidents: 0, processed: 0, score: 0, streak: 0, fail: null,
+  RUN = { mode: m, correct: 0, incidents: 0, cites: 0, processed: 0, score: 0, streak: 0, fail: null,
     day: 1, savings: 30, hot: 0, stale: 0, bookPos: [424, 124] };
 }
 
@@ -66,6 +84,7 @@ function startShift() {
     insp: { on: false, sel: [], banner: null }, toast: null, gateT: -9,
     closing: false, ended: false,
     pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
+    intro: now, typed: -1,
   };
   // 上班时门口早已挤满请求，队尾一直排到看不见的地方
   for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
@@ -75,8 +94,8 @@ function startShift() {
   const M = mode();
   const note = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice);
   D.wins.push({ win: note, kind: 'notice', x: 316, y: 126 });
-  if (RUN.mode === 'endure' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
-  if (RUN.mode === 'endure' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
+  if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
+  if (RUN.mode === 'story' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
 }
 
 function later(dt, fn) { D.timers.push({ t: now + dt, fn }); }
@@ -106,7 +125,7 @@ const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完�
 const dayU = () => clamp(elapsed() / DAY_LEN);                          // 持久模式：01:00 a.m. → 01:00 p.m.
 const closeAt = () => (RUN.hot ? 0.75 : 1);                             // 过热：10:00 a.m. 下线
 
-// 12 小时制；最后一小时（剩 60 分钟以内）开始闪烁
+// 12 小时制；最后一小时在检查站显示闪烁提示
 const shiftMinutes = () => Math.floor((D.closing ? closeAt() : dayU()) * SHIFT_SPAN_MIN + 1e-9);   // 上班后经过的分钟；下班后停在收班时间
 function worldClock() {
   const m = SHIFT_START_MIN + shiftMinutes();
@@ -115,7 +134,6 @@ function worldClock() {
 }
 const minsToClose = () => Math.floor(closeAt() * SHIFT_SPAN_MIN) - shiftMinutes();
 const clockUrgent = () => { const left = minsToClose(); return left > 0 && left <= 60; };
-const clockOn = () => !clockUrgent() || Math.floor(now * 2) % 2 === 0;
 
 // ———————————————————— 请求进出 ————————————————————
 
@@ -177,23 +195,33 @@ function judge(e, kind) {
   if (right) {
     RUN.correct++; D.correct++; RUN.streak++;
     if (RUN.mode === 'perfect') { const v = unitValue(); RUN.score += v; toast(`+${v}`, K.GREEN); }
-    if (RUN.mode === 'endure') D.pay += PAY;
+    if (RUN.mode === 'endure') { RUN.score += SCORE_UP; toast(`+${SCORE_UP}`, K.GREEN); }
+    if (RUN.mode === 'story') D.pay += PAY;
     return;
   }
   RUN.incidents++; RUN.streak = 0;
+  RUN.cites++;
+  const cite = citationLines(RUN.cites);
   const lines = kind === 'approve' ? ['放行了违规请求：', spec.reason] : ['拦截了合规请求：', '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
-    notice('事故通知', lines.concat([`损失 ${PENALTY_SEC} 秒`]));
+    notice('处分通知', lines.concat(cite));
   } else if (RUN.mode === 'perfect') {
     RUN.fail = lines;
-    notice('事故通知', lines.concat(['完美模式结束']));
+    notice('处分通知', lines.concat(cite));
     later(2.2, finishRun);
+  } else if (RUN.mode === 'endure') {
+    RUN.score -= SCORE_DOWN;
+    const over = RUN.score < 0;
+    notice('处分通知', lines.concat(cite));
+    if (over) {
+      RUN.fail = lines.concat(['分数为负：节点停机']);
+      later(2.2, finishRun);
+    }
   } else {
     D.cites++;
-    const fine = (D.cites - 1) * FINE_STEP;
-    D.fines += fine;
-    notice('处分通知', lines.concat([fine ? `罚款：${fine} token（下次 ${fine + FINE_STEP}）` : `今日首次处分：警告（下次罚款 ${FINE_STEP} token）`]));
+    D.fines += citationFine(RUN.cites);
+    notice('处分通知', lines.concat(cite));
   }
 }
 
@@ -229,6 +257,7 @@ function endDay() {
 // ———————————————————— 每帧 ————————————————————
 
 function updateDesk() {
+  if (D.intro !== null) { introSounds(); if (introT() >= INTRO.end) endIntro(); return; }
   runTimers();
   if (D.ended || !D.started) return;
   const m = mode();
@@ -237,7 +266,7 @@ function updateDesk() {
     D.nextArrive = now + m.arrive[0] + Math.random() * (m.arrive[1] - m.arrive[0]);
   }
   if (RUN.mode === 'timed' && timeLeft() <= 0) { SFX.play('bell'); finishRun(); return; }
-  if (RUN.mode === 'endure' && !D.closing && dayU() >= closeAt()) closeShift();
+  if (RUN.mode === 'story' && !D.closing && dayU() >= closeAt()) closeShift();
   if (D.closing && !D.ent) endDay();
 }
 
@@ -247,6 +276,7 @@ const iconBox = (ic) => [ic.x, ic.y, ic.x + 25, ic.y + 19];
 const winBox = (w) => [w.x, w.y, w.x + w.win.w - 1, w.y + w.win.h - 1];
 
 function deskDown(x, y) {
+  if (D.intro !== null) return;   // 开场不可跳过
   if (D.ended) return;
   if (inBox(x, y, BOOK_BTN)) return toggleBook();
   if (inBox(x, y, INSPECT_BTN)) return setInspect(!D.insp.on);
@@ -331,6 +361,7 @@ function toggleBook() {
 }
 
 function deskKey(k) {
+  if (D.intro !== null) return;   // 开场不可跳过
   if (D.ended) return;
   if (k === ' ' || k === 'n') callNext();
   else if (k === 'a') decide('approve');
@@ -348,7 +379,7 @@ function clampDesk(x, y, win) {
 
 function setInspect(on) {
   if (D.insp.on === on) return;
-  if (on && RUN.mode === 'endure' && RUN.stale) { toast('训练数据过期：今天无法使用『比对』', K.AMBER); return; }
+  if (on && RUN.mode === 'story' && RUN.stale) { toast('训练数据过期：今天无法使用『比对』', K.AMBER); return; }
   D.insp.on = on;
   D.insp.sel = [];
   if (!on && D.insp.banner && !D.insp.banner.ok) D.insp.banner = null;
@@ -420,6 +451,7 @@ function drawDesk() {
   if (!drawBanner()) drawToast();
   if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true, drag.inst.book);
   if (drag && drag.type === 'win' && drag.inst.out) docIcon(ptr.x - 8, ptr.y - 6, true, drag.inst.kind === 'book');
+  if (D.intro !== null) drawIntro();
   scanlines(0, 0, W - 1, H - 1, 0.12);
 }
 
@@ -431,12 +463,16 @@ function drawHud() {
   const parts = [];
   if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`得分 ${RUN.score}`, K.GREEN], [`事故 ${RUN.incidents}`, RUN.incidents ? K.RED : K.DIM]);
   if (RUN.mode === 'perfect') parts.push([`得分 ${RUN.score}`, K.WHITE], [`每单 +${unitValue()}`, K.GREEN], [`用时 ${mmss(elapsed())}`, K.DIM]);
-  if (RUN.mode === 'endure') {
-    parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), clockUrgent() || D.closing ? K.AMBER : K.WHITE, clockOn()],
+  if (RUN.mode === 'story') {
+    parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), D.closing ? K.AMBER : K.WHITE],
       [`今日正确 ${D.correct}`, K.GREEN], [`处分 ${D.cites}`, D.cites ? K.RED : K.DIM]);
   }
+  if (RUN.mode === 'endure') {
+    parts.push([`得分 ${RUN.score}`, RUN.score < 0 ? K.RED : K.WHITE],
+      [`正确 ${RUN.correct}`, K.GREEN], [`失误 ${RUN.incidents}`, RUN.incidents ? K.RED : K.DIM]);
+  }
   let x = W - 96;   // 右上角留给页面上的“声音 / 全屏”按钮
-  for (const [s, col, show = true] of parts.reverse()) { if (show) txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
+  for (const [s, col] of parts.reverse()) { txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
 }
 
 // —— 上方：请求在风控检查站前排队 ——
@@ -445,8 +481,6 @@ function drawPipe() {
   for (let x = 0; x < W; x += 16) rect(x, PIPE[1], x, PIPE[3], K.GRID);
   for (let y = PIPE[1] + 8; y < PIPE[3]; y += 16) rect(0, y, W - 1, y, K.GRID);
   rect(0, PIPE[3], W - 1, PIPE[3], K.LINE);
-  txt(8, 20, '入口 INGRESS', 8, K.DIM);
-  if (!D.started) txt(GATE[0] - 12, 90, '待机：点击『下一位』开始工作', 8, Math.floor(now * 2) % 2 ? K.AMBER : K.DIM, 'ra');
   const flow = D.started && !D.closing ? -now * 12 : 0;
   dashLine(0, LANE_Y, GATE[0] - 1, LANE_Y, K.LINE, flow);
   // 队首在最靠近检查站的位置，后面一直排到画面外
@@ -463,22 +497,11 @@ function drawPipe() {
     rect(x, y - 3, x + 7, y + 3, rgba(p.col.map((c) => c * 0.35), a));
     outline(x, y - 3, x + 7, y + 3, rgba(p.col, a));
   });
-  // 检查站
+  // 防火墙：沿检查站中轴上下贯通画实线，窗口就是墙上唯一的开口
   const [gx0, gy0, gx1, gy1] = GATE;
-  txt((gx0 + gx1) >> 1, gy0 - 12, '风控检查站', 8, K.CLAUDE_L, 'ma');
-  frame(gx0, gy0, gx1, gy1, K.CLAUDE, K.PANEL);
-  if (D.started) {
-    const sy = gy0 + 3 + Math.floor((now * 40) % (gy1 - gy0 - 6));
-    rect(gx0 + 2, sy, gx1 - 2, sy, rgba(C.CLAUDE_L, 0.5));
-  }
-  const e = D.ent;
-  if (e && !e.leaving) {
-    const u = easeOut(seg(now, D.gateT, D.gateT + 0.4));
-    const x = Math.round(lerp(gx0 - 14, ((gx0 + gx1) >> 1) - 5, u));
-    rect(x, LANE_Y - 4, x + 10, LANE_Y + 4, Math.floor(now * 3) % 2 ? K.AMBER_D : K.PANEL_L);
-    outline(x, LANE_Y - 4, x + 10, LANE_Y + 4, K.AMBER);
-  }
-  txt((gx0 + gx1) >> 1, gy1 + 5, 'H-0417', 8, K.DIM, 'ma');
+  const wx = (gx0 + gx1) >> 1;
+  line(wx, PIPE[1], wx, gy0 - 1, K.CYAN_D);
+  line(wx, gy1 + 1, wx, PIPE[3], K.CYAN_D);
   // 出口：绿色向上 = 放行，红色向下 = 拦截（直接通到上下边界，不显示去向和数量）
   const bx = SPLIT_X;
   line(gx1 + 1, LANE_Y, bx, LANE_Y, K.LINE);
@@ -497,6 +520,22 @@ function drawPipe() {
     const x = Math.round(lerp(p[0], q[0], v)), y = Math.round(lerp(p[1], q[1], v));
     rect(x - 3, y - 3, x + 3, y + 3, f.kind === 'approve' ? K.GREEN : K.RED);
   }
+  // 图层顺序：网格 / 队列 / 道路线 / 分流线 → 主角 clawd（压在线路上）→ 检查站（压住主角）
+  drawClawdsUnder();
+  // 检查站
+  frame(gx0, gy0, gx1, gy1, K.CLAUDE, K.PANEL);
+  if (D.started) {
+    const sy = gy0 + 3 + Math.floor((now * 40) % (gy1 - gy0 - 6));
+    rect(gx0 + 2, sy, gx1 - 2, sy, rgba(C.CLAUDE_L, 0.5));
+  }
+  const e = D.ent;
+  if (e && !e.leaving) {
+    const u = easeOut(seg(now, D.gateT, D.gateT + 0.4));
+    const x = Math.round(lerp(gx0 - 14, ((gx0 + gx1) >> 1) - 5, u));
+    rect(x, LANE_Y - 4, x + 10, LANE_Y + 4, Math.floor(now * 3) % 2 ? K.AMBER_D : K.PANEL_L);
+    outline(x, LANE_Y - 4, x + 10, LANE_Y + 4, K.AMBER);
+  }
+  drawClawds();
 }
 
 // —— 左下：审查窗 ——
@@ -504,7 +543,6 @@ function drawReview() {
   const [x0, y0, x1, y1] = REVIEW;
   rect(x0, y0, x1, y1, K.BG);
   frame(x0 + 2, y0 + 2, x1 - 2, y1 - 2, K.LINE_L);
-  txt(x0 + 8, y0 + 5, '审查窗 · REVIEW', 8, K.CYAN);
   const [ax, ay] = AVATAR_XY, as = 22 * AVATAR_K;
   frame(ax - 2, ay - 2, ax + as + 1, ay + as + 1, K.CYAN_D, K.INK);
   const e = D.ent;
@@ -596,15 +634,12 @@ function drawTaskbar() {
   rect(TASKBAR[0], TASKBAR[1], TASKBAR[2], TASKBAR[1], K.LINE_L);
   const e = D.ent, can = e && e.handed && !e.leaving;
   button(BOOK_BTN, '手册', K.CLAUDE_L, { size: 8, hot: !!D.book });
-  button(INSPECT_BTN, '比对', K.AMBER, { size: 8, hot: D.insp.on, off: RUN.mode === 'endure' && RUN.stale > 0 });
+  button(INSPECT_BTN, '比对', K.AMBER, { size: 8, hot: D.insp.on, off: RUN.mode === 'story' && RUN.stale > 0 });
   button(APPROVE_BTN, '放行', K.GREEN, { size: 8, off: !can });
   button(DENY_BTN, '拦截', K.RED, { size: 8, off: !can });
-  // 世界观时间只在持久模式显示；日期都要显示（核对有效期）
-  const date = fmtDate(today());
-  txt(DATE_BOX[2], DATE_BOX[1] + 2, date, 8, K.TEXT, 'ra');
-  if (RUN.mode === 'endure' && clockOn()) {
-    txt(DATE_BOX[2] - tw(date, 8) - 12, DATE_BOX[1] + 2, worldClock(), 8, clockUrgent() ? K.AMBER : K.TEXT, 'ra');
-  }
+  // 世界观时间只在故事模式显示；日期都要显示（核对有效期）
+  const s = RUN.mode === 'story' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today());
+  txt(DATE_BOX[2], DATE_BOX[1] + 2, s, 8, K.TEXT, 'ra');
 }
 
 // 比对模式：桌面压暗，所有可点的栏位描黄框
@@ -649,4 +684,93 @@ function drawToast() {
   const w = tw(t.text, 10) + 20, cx = (SCREEN[0] + SCREEN[2]) >> 1;
   frame(cx - w / 2, 124, cx + w / 2, 140, t.col, K.INK);
   txt(cx, 128, t.text, 10, t.col, 'ma');
+}
+
+// ———————————————————— 开场 ————————————————————
+// 黑屏后上方先亮起：主角 clawd 一开场就已经从右侧横线中点向左走（画在道路线之上、检查站之下，进站就被挡住）；
+// 左上的红队 clawd 全程待机，两名红队 clawd 守在岔路口左侧上下，不压在路上；开场不播拘捕动画、窗口里也不放请求；
+// 下方保持黑屏打字机打日期：打完后黑幕再停 2 秒，等主角完全走进检查站才淡入操作区。开场不可跳过。
+
+const INTRO = { lit: [0.3, 1.0], type: 1.2, cps: 5, walk: [0, 4.9], reveal: [5.0, 5.7], end: 5.7 };
+const CLAWD_PX = ['.XXXXXXXXX.', '.XXXXXXXXX.', '.XXEXXXEXX.', '.XXEXXXEXX.', 'XXXXXXXXXXX', '.XXXXXXXXX.'];
+const CLAWD_LEGS = [['.X.X...X.X.', '.X.X...X.X.'], ['.X.X...X.X.', 'X.X...X.X..'], ['.X.X...X.X.', '..X.X...X.X']];
+const CLAWD_K = 2;   // 11×8 像素图放大两倍
+const CLAWD_W = CLAWD_PX[0].length * CLAWD_K;
+const CLAWD_STEP_FPS = 4;   // 步频：跟着慢走速度放慢，避免小碎步
+// 岔路口（x=512）左侧上下各一名守卫：避开横向道路与分流虚线
+const RED_POST = [258, 22], RED_GUARDS = [[479, 40], [479, 76]];
+const BOOTH = [309, LANE_Y - 8];   // 检查站正中（clawd 左上角坐标，身体压在线路上）
+const START_X = ((GATE[2] + 1 + SPLIT_X) >> 1) - (CLAWD_W >> 1);   // 右侧横线的中点（角色身体居中）
+const WALK_PATH = [[START_X, LANE_Y - 8], BOOTH];
+
+const introT = () => now - D.intro;
+const introDate = () => { const d = today(); return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`; };
+
+function endIntro() {
+  D.intro = null;
+  if (D.toast) D.toast.t = now;   // 开场时弹的提示（故事模式）重新计时，别被黑屏吃掉
+}
+
+function introSounds() {
+  const n = Math.floor((introT() - INTRO.type) * INTRO.cps);
+  if (n === D.typed || n < 0 || n >= [...introDate()].length) return;
+  D.typed = n;
+  SFX.key(n);
+}
+
+// moving：走路时脚交替
+function clawd(x, y, col, moving = false) {
+  const legs = moving ? CLAWD_LEGS[[0, 1, 0, 2][Math.floor(now * CLAWD_STEP_FPS) % 4]] : CLAWD_LEGS[0];
+  pattern(CLAWD_PX.concat(legs), Math.round(x), Math.round(y), { X: col, E: K.INK }, CLAWD_K);
+}
+
+// 折线上按长度匀速走，u ∈ [0, 1]
+function along(pts, u) {
+  const lens = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
+  let d = u * lens.reduce((a, b) => a + b, 0), k = 0;
+  while (k < lens.length - 1 && d > lens[k]) { d -= lens[k]; k++; }
+  const v = lens[k] ? Math.min(1, d / lens[k]) : 1;
+  return [lerp(pts[k][0], pts[k + 1][0], v), lerp(pts[k][1], pts[k + 1][1], v)];
+}
+
+function clipPipe() {
+  G.save();
+  G.beginPath(); G.rect(PIPE[0], PIPE[1], PIPE[2] - PIPE[0] + 1, PIPE[3] - PIPE[1]); G.clip();
+}
+
+// 主角 clawd：画在道路 / 分流线之上，检查站之下（走进窗口后被检查站挡住，开场结束后不再画）
+function drawClawdsUnder() {
+  if (D.intro === null) return;
+  const t = introT(), [w0, w1] = INTRO.walk;
+  if (t < w0) return;
+  clipPipe();
+  const [x, y] = along(WALK_PATH, seg(t, w0, w1));
+  clawd(x, y, K.CLAUDE, t < w1);
+  G.restore();
+}
+
+// 检查站上层：红队 clawd（左边那位全程待机）
+function drawClawds() {
+  clipPipe();
+  for (const [x, y] of RED_GUARDS) clawd(x, y, K.RED);
+  clawd(RED_POST[0], RED_POST[1], K.RED);
+  G.restore();
+}
+
+function drawIntro() {
+  const t = introT();
+  const lit = 1 - seg(t, ...INTRO.lit), dark = 1 - seg(t, ...INTRO.reveal);
+  if (lit > 0) darken(lit, C.INK, [0, 0, W - 1, PIPE[3]]);
+  if (dark <= 0) return;
+  G.globalAlpha = dark;
+  rect(0, PIPE[3] + 1, W - 1, H - 1, K.INK);
+  const s = introDate(), n = Math.max(0, Math.floor((t - INTRO.type) * INTRO.cps));
+  const x = Math.round(W / 2 - tw(s, 12)), y = 224;
+  const shown = [...s].slice(0, n).join('');
+  if (shown) bigText(x, y, shown, 12, 2, K.WHITE, null, 'left');
+  if (t > INTRO.type - 0.4 && Math.floor(t * 2) % 2 === 0) {
+    const cx = x + (shown ? tw(shown, 12) * 2 : 0) + 2;
+    rect(cx, y, cx + 9, y + 21, K.CYAN);
+  }
+  G.globalAlpha = 1;
 }
