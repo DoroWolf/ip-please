@@ -4,8 +4,9 @@
 function go(name) {
   scene = name; sceneT0 = now;
   lastKey = -1;
+  if (name !== 'title' && titleMusic) { SFX.stop(titleMusic); titleMusic = null; }
   SFX.ambient(name === 'desk');
-  if (name === 'title') SFX.play('title', 0.6);
+  if (name === 'title') titleMusic = SFX.play('title', 0.6);
   if (name === 'daycard') SFX.play('day_hit');
   if (name === 'summary') { SFX.play('sad', 0.8); initSummary(); }
   if (name === 'result') SFX.play(RUN.fail ? 'sad' : 'end', 0.8);
@@ -14,6 +15,8 @@ function go(name) {
 
 // 黑屏转场：先压黑，再切场景
 let fade = null;
+// 标题画面的一次性背景音乐：进入游戏后要停掉
+let titleMusic = null;
 function fadeGo(name, dur = 0.45) {
   if (!fade) fade = { t0: now, to: name, dur };
 }

@@ -18,10 +18,15 @@ const INSPECT_ICON = APP_BOX.insp;
 // 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拦截 栏即做出决定
 const TRAY_W = 72, TRAY_BOX = [W - TRAY_W, 154, W - 1, 270], TRAY_HOT = [W - 10, 119, W - 1, 343];
 const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W - 6, 264] };
-const NEXT_BTN = [10, 322, 70, 348];
+const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
-const RV_FIELDS = { 'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171] };
+// 审查窗里的可比对栏位：IP / 昵称 / 类型，以及请求摘要（和 API 授权的用途核对）。
+// 请求摘要框含标签和最多三行摘要（178 / 190 + 10 * i），下缘停在对话分隔线之前
+const RV_FIELDS = {
+  'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
+  'rv.请求': [RV_X - 3, 176, 209, 222],
+};
 const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
 const SPLIT_X = 512;   // 放行向上、拦截向下的分流口（右侧道路拉长后再分叉）
@@ -34,9 +39,9 @@ let drag = null;
 let scene = 'boot', sceneT0 = 0;
 const st = () => now - sceneT0;
 let RUN = null;              // 这一局（故事模式跨天）
-let D = null;                // 这一班（限时 / 完美 / 持久模式整局只有一班；故事模式一天一班）
+let D = null;                // 这一班（限时 / 完美 / 耐力模式整局只有一班；故事模式一天一班）
 
-// —— 模式定义（标题上开放限时 / 完美 / 持久；故事模式暂不开放） ——
+// —— 模式定义（标题上开放限时 / 完美 / 耐力；故事模式暂不开放） ——
 const MODES = {
   timed: {
     name: '限时模式', en: 'TIME ATTACK', desc: ['10 分钟内处理尽可能多的请求。', '每次事故损失 30 秒。'],
@@ -55,13 +60,14 @@ const MODES = {
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
   endure: {
-    name: '持久模式', en: 'ENDURANCE', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
+    name: '耐力模式', en: 'ENDURANCE', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
     notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
 };
 const TIMED_LEN = 600, DAY_LEN = 300, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
-const SCORE_UP = 1, SCORE_DOWN = 5;                 // 持久模式：正确 +1，失误 -5
+const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
+const SUSPEND_SEC = 5, SUSPEND_PTS = 2;             // 拘留奖励：限时模式 +5 秒，耐力模式该单共得 2 分
 
 // 事故处分单（三个模式统一）：第 1 次警告、第 2 次最后警告、第 3／4 次罚 5 token，之后每次 +5
 function citationFine(n) {
@@ -78,7 +84,7 @@ const mode = () => MODES[RUN.mode];
 const today = () => addDays(WORLD_DATE, RUN.mode === 'story' ? RUN.day - 1 : 0);
 
 function newRun(m) {
-  RUN = { mode: m, correct: 0, incidents: 0, cites: 0, processed: 0, score: 0, streak: 0, fail: null,
+  RUN = { mode: m, correct: 0, incidents: 0, cites: 0, processed: 0, score: 0, peak: 0, time: 0, streak: 0, fail: null, detained: 0,
     day: 1, savings: 30, hot: 0, stale: 0, bookPos: [424, 124] };
 }
 
@@ -89,15 +95,18 @@ function startShift() {
     started: false, tStart: 0, timeAdj: 0,
     queue: [], nextArrive: 0, ent: null, wins: [], icons: [], lines: [], chat: [], timers: [], flows: [],
     insp: { on: false, sel: [], banner: null }, toast: null, gateT: -9,
-    closing: false, ended: false,
+    closing: false, over: false, ended: false,
     pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
-    intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now },
+    intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now }, arrest: null,
   };
   // 上班时门口早已挤满请求，队尾一直排到看不见的地方
   for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
   D.rulebook = new Rulebook();
   const M = mode();
-  D.notice = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice);
+  // 特别关注对象：这一班固定三个头像，印在通告第 2 页
+  const avs = [...ASSETS.avatars];
+  D.wanted = Array.from({ length: WANTED_N }, () => avs.splice(rint(0, avs.length - 1), 1)[0]);
+  D.notice = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice, D.wanted);
   addWin(D.notice, 'notice', 316, 126);
   if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
   if (RUN.mode === 'story' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
@@ -129,7 +138,7 @@ function toast(text, col = K.CYAN) { D.toast = { text, col, t: now }; }
 const elapsed = () => (D.started ? now - D.tStart : 0);
 const timeLeft = () => TIMED_LEN - elapsed() + D.timeAdj;
 const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完美模式：每单分数
-const dayU = () => clamp(elapsed() / DAY_LEN);                          // 持久模式：01:00 a.m. → 01:00 p.m.
+const dayU = () => clamp(elapsed() / DAY_LEN);                          // 耐力模式：01:00 a.m. → 01:00 p.m.
 const closeAt = () => (RUN.hot ? 0.75 : 1);                             // 过热：10:00 a.m. 下线
 
 // 12 小时制；最后一小时在检查站显示闪烁提示
@@ -147,6 +156,7 @@ const clockUrgent = () => { const left = minsToClose(); return left > 0 && left 
 function callNext() {
   if (D.ent && D.ent.decided && !D.ent.leaving) { toast('先把证件拖回头像处，还给对方', K.AMBER); return; }
   if (D.ent || D.ended || RUN.fail) return;
+  if (D.over) { toast('时间到，不再接新请求', K.AMBER); return; }
   if (D.closing) { toast('已经下班，不再接新请求'); return; }
   if (!D.queue.length) { toast('队列暂时为空，等待新请求……'); return; }
   if (!D.started) { D.started = true; D.tStart = now; D.nextArrive = now + 1; }
@@ -154,8 +164,8 @@ function callNext() {
   D.queue.shift();
   D.gateT = now;
   D.chat.length = 0;   // 历史记录：新的请求进来，上一段对话清空
-  const spec = makeRequest(today(), mode().pBad);
-  const e = { spec, t0: now, voice: rint(100, 190), handed: false, leaving: false, asked: new Set(), decided: null, judged: false };
+  const spec = makeRequest(today(), mode().pBad, D.wanted);
+  const e = { spec, t0: now, voice: rint(100, 190), handed: false, leaving: false, asked: new Set(), decided: null, judged: false, measureReady: false, measureUsed: false };
   D.ent = e;
   D.hinted.next = true;
   say('C', '下一个请求。');
@@ -178,6 +188,11 @@ function layoutIcons() {
 }
 
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
+// 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到比对出新的异常并重新询问
+const canSmsNow = (e) => !!e && !!e.canSms && !e.smsSent && !e.leaving;
+const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving;
+const measureArmed = (e) => !!e && !!e.measureReady && !e.leaving;
+const measureAvailable = (e) => canSmsNow(e) || canSuspendNow(e);
 
 // 做出决定：在凭证上盖章。交还证件前随时可以改主意，重新盖章只是换章，不判定。
 // 真正的判定（对不对、算不算事故）等到证件全部交还、请求处理完毕才做。
@@ -196,42 +211,71 @@ function decide(kind) {
 function finishRequest(e) {
   if (e.decided && !e.judged) { e.judged = true; judge(e, e.decided); }
   e.leaving = true; e.tLeave = now;
-  D.flows.push({ t0: now, kind: e.decided });
+  D.wins = D.wins.filter((w) => w.kind !== 'smsf' && w.kind !== 'sms');   // SMS 表单和档案跟着这一单收走
+  if (e.decided === 'suspend') D.arrest = { t0: now };   // 拘留：左上的红队 clawd 把请求押走，不走分流口
+  else D.flows.push({ t0: now, kind: e.decided });
   setInspect(false);
   D.insp.banner = null;
-  later(0.6, () => { if (D.ent === e) D.ent = null; });
+  later(e.decided === 'suspend' ? 1.4 : 0.6, () => { if (D.ent === e) D.ent = null; });
+}
+
+// 拘留：比对出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。切断连接，桌面上和柜台上的证件全部清掉，直接判定
+function suspend() {
+  const e = D.ent;
+  if (!e || !e.canSuspend || e.leaving || RUN.fail) return;
+  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  const docs = e.spec.docs;
+  if (drag && docs.includes(drag.inst.win)) drag = null;
+  D.icons = D.icons.filter((ic) => !docs.includes(ic.win));
+  D.wins = D.wins.filter((w) => !(w.kind === 'doc' && docs.includes(w.win)));
+  layoutIcons();
+  e.decided = 'suspend';
+  say('C', '没门。');
+  SFX.play('stamp_deny');
+  SFX.play('siren_short', 0.5);
+  finishRequest(e);
 }
 
 function judge(e, kind) {
   const spec = e.spec;
-  const right = (kind === 'approve') === (spec.flaw === null);
+  const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : (kind === 'approve') === (spec.flaw === null);
   RUN.processed++; D.total++;
   if (RUN.mode === 'timed') RUN.score++;
   if (right) {
     RUN.correct++; D.correct++; RUN.streak++;
+    if (kind === 'suspend') RUN.detained++;
+    if (RUN.mode === 'timed' && kind === 'suspend') { D.timeAdj += SUSPEND_SEC; toast(`拘留成功 +${SUSPEND_SEC} 秒`, K.GREEN); }
     if (RUN.mode === 'perfect') { const v = unitValue(); RUN.score += v; toast(`+${v}`, K.GREEN); }
-    if (RUN.mode === 'endure') { RUN.score += SCORE_UP; toast(`+${SCORE_UP}`, K.GREEN); }
+    if (RUN.mode === 'endure') {
+      const v = kind === 'suspend' ? SUSPEND_PTS : SCORE_UP;
+      RUN.score += v;
+      RUN.peak = Math.max(RUN.peak, RUN.score);   // 结算分数取到达过的最大 token
+      toast(kind === 'suspend' ? `拘留成功 +${v}` : `+${v}`, K.GREEN);
+    }
     if (RUN.mode === 'story') D.pay += PAY;
     return;
   }
   RUN.incidents++; RUN.streak = 0;
   RUN.cites++;
   const cite = citationLines(RUN.cites);
-  const lines = kind === 'approve' ? ['放行了违规请求：', spec.reason] : ['拦截了合规请求：', '证件齐全，信息一致'];
+  const lines = kind === 'approve' ? ['放行了违规请求：', spec.reason]
+    : [kind === 'suspend' ? '拘留了合规请求：' : '拦截了合规请求：', spec.legit ? `本人${spec.legit === 'photo' ? '换过头像' : '改过昵称'}，可经 SMS 验证确认` : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
     notice('处分通知', lines.concat(cite));
   } else if (RUN.mode === 'perfect') {
     RUN.fail = lines;
     notice('处分通知', lines.concat(cite));
-    later(2.2, finishRun);
+    workOver();
+    later(2, finishRun);
   } else if (RUN.mode === 'endure') {
     RUN.score -= SCORE_DOWN;
     const over = RUN.score < 0;
     notice('处分通知', lines.concat(cite));
     if (over) {
       RUN.fail = lines.concat(['分数为负：节点停机']);
-      later(2.2, finishRun);
+      workOver();
+      later(2, finishRun);
     }
   } else {
     D.cites++;
@@ -247,9 +291,18 @@ function notice(title, lines, tone = 'red') {
   if (tone === 'red') { SFX.play('citation'); later(0.25, () => SFX.play('discrepancy', 0.5)); }
 }
 
+// 达到游戏结束条件：只放当天下班的铃声，队伍留在原地（不散开），也不再接新请求
+function workOver() {
+  if (D.over) return;
+  D.over = true;
+  RUN.time = elapsed();   // 结算画面的用时停在这一刻
+  SFX.play('bell');
+}
+
 function finishRun() {
   if (D.ended) return;
   D.ended = true;
+  if (RUN.mode === 'endure') RUN.score = RUN.peak;   // 耐力模式：分数为到达过的最大 token
   saveRecord();
   go('result');
 }
@@ -276,11 +329,18 @@ function updateDesk() {
   runTimers();
   if (D.ended || !D.started) return;
   const m = mode();
-  if (!D.closing && now >= D.nextArrive) {
+  if (!D.closing && !D.over && now >= D.nextArrive) {
     if (D.queue.length < QUEUE_CAP) D.queue.push(newPacket(now));
     D.nextArrive = now + m.arrive[0] + Math.random() * (m.arrive[1] - m.arrive[0]);
   }
-  if (RUN.mode === 'timed' && timeLeft() <= 0) { SFX.play('bell'); finishRun(); return; }
+  // 限时模式：时间到后不再进件，审完手头上的请求才结算
+  if (RUN.mode === 'timed') {
+    if (!D.over && timeLeft() <= 0) {
+      workOver();
+      toast('时间到：审完手头上的请求后结算', K.AMBER);
+    }
+    if (D.over && !D.ent) finishRun();
+  }
   if (RUN.mode === 'story' && !D.closing && dayU() >= closeAt()) closeShift();
   if (D.closing && !D.ent) endDay();
 }
@@ -339,6 +399,8 @@ function openApp(key) {
     return closeWin(w);
   }
   SFX.play('select');
+  // 手册每次重新打开都先翻回目录；最小化 / 还原或提到最前不强制翻页
+  if (key === 'book') D.rulebook.page = D.rulebook.home;
   const win = key === 'book' ? D.rulebook : key === 'notice' ? D.notice : new HistoryLog(D.chat);
   const [x, y] = key === 'book' ? RUN.bookPos : key === 'notice' ? [316, 126] : [380, 140];
   addWin(win, key, ...clampDesk(x, y, win));
@@ -389,10 +451,24 @@ function deskDown(x, y) {
   const b = D.insp.banner;
   if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
   if (inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
+  // 柜台第一个按钮：先询问异常才有措施；按下后锁定，直到比对出新的异常并重新询问
+  const e = D.ent;
+  if (inBox(x, y, NEXT_BTN)) {
+    if (measureArmed(e)) {
+      if (canSmsNow(e)) return smsOpen();
+      if (canSuspendNow(e)) return suspend();
+    }
+    if (measureAvailable(e)) {
+      const b = D.insp.banner;
+      const newIssue = b && b.ok && !e.asked.has(b.issue);
+      toast(e.measureUsed && !newIssue ? '措施已按下：再比对出新的异常，才能重新询问' : '先询问异常，再采取措施', K.AMBER);
+      return;
+    }
+  }
   if (D.insp.on) {
-    // 比对模式下也能翻手册的页签，方便对照签名式样
+    // 比对模式下也能翻手册 / 通告（页签 / 书签 / 目录），方便对照签名式样和特别关注对象
     const w = topWinAt([x, y]);
-    if (w && w.kind === 'book' && inBox(x - w.x, y - w.y, w.win.tab)) { w.win.flip(); SFX.play('select'); return; }
+    if (w && w.win.press && w.win.press(x - w.x, y - w.y)) { SFX.play('select'); return; }
     if (inBox(x, y, LOWER)) inspectClick(x, y);
     return;
   }
@@ -448,11 +524,12 @@ function deskUp(x, y) {
     const rx = x - w.x, ry = y - w.y;
     if (w.win.closable && inBox(rx, ry, CLOSE_BOX(w.win))) return closeWin(w);
     if (inBox(rx, ry, MIN_BOX(w.win))) return minimize(w);
-    if (w.kind === 'book' && inBox(rx, ry, w.win.tab)) { w.win.flip(); SFX.play('select'); }
+    if (w.win.press && w.win.press(rx, ry)) SFX.play('select');
     return;
   }
   const out = w.out;
   delete w.out;
+  if (w.kind === 'smsf' && inBox(x, y, AVATAR_BOX)) { [w.x, w.y] = d.prev; return smsSend(w); }
   // 拖去盖章 / 归还：盖完章的窗口回到原位
   if (dropDoc(w.win, x, y, () => { D.wins = D.wins.filter((o) => o !== w); })) { [w.x, w.y] = d.prev; return; }
   if (!out) { if (w.kind === 'book') RUN.bookPos = [w.x, w.y]; return; }
@@ -474,6 +551,8 @@ function deskKey(k) {
   if (k === ' ' || k === 'n') callNext();
   else if (k === 'a') decide('approve');
   else if (k === 'd') decide('deny');
+  else if (k === 's') suspend();
+  else if (k === 'v' && D.ent && D.ent.canSms && !D.ent.leaving) smsOpen();
   else if (k === 'e') setInspect(!D.insp.on);
   else if (k === 'r') openApp('book');
   else if (k === 'h') openApp('hist');
@@ -523,6 +602,7 @@ function fieldAt(x, y) {
 function compareOutcome(e, keys) {
   const issue = e && e.handed && !e.leaving && e.spec.issues.find((is) => is.pairs.some((p) => p.slice().sort().join('|') === keys));
   if (issue) return { ok: true, kind: 'bad', issue, title: issue.title, sub: issue.sub };
+  if (e && e.spec.confirms.has(keys)) return { ok: false, kind: 'ok', title: '身份已确认', sub: '与身份档案一致：确为本人' };
   if (e && e.spec.checks && e.spec.checks.has(keys)) return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
   return { ok: false, kind: 'none', title: '无关联', sub: '这两项信息之间没有可核对的关系' };
 }
@@ -540,14 +620,66 @@ function inspectClick(x, y) {
   const res = compareOutcome(D.ent, keys);
   I.banner = { ...res, t: now };
   SFX.play(res.kind === 'bad' ? 'discrepancy' : 'click');
+  const e = D.ent;
+  if (res.kind !== 'bad') return;
+  const t = res.issue.type;
+  if (SMS_ISSUES.includes(t) && !e.canSms) { e.canSms = true; toast('身份存疑：先点『询问』，再验证 SMS', K.GREEN); }
+  if (SUSPEND_ISSUES.includes(t) && !e.canSuspend) {
+    e.canSuspend = true;
+    if (!SMS_ISSUES.includes(t)) toast('可以拘留：先点『询问』，再按『拘留』', K.RED);
+  }
 }
 
 function askAbout(issue) {
   const e = D.ent;
-  if (!e || e.asked.has(issue) || e.leaving) return;
+  if (!e || e.leaving || e.asked.has(issue)) return;   // 同一异常只问一次；新的异常才能再问
   e.asked.add(issue);
-  say('C', QUESTIONS[e.spec.flaw]);
+  e.measureReady = true;   // 询问异常后解锁措施按钮
+  say('C', QUESTIONS[issue.type]);
   later(0.9, () => { if (D.ent === e) say('E', issue.ask); });
+}
+
+// ———————————————————— 验证 SMS ————————————————————
+// 点『验证SMS』：桌面上弹出空白表单 → 拖到头像上发给对方 → 对方报出手机号，表单填好送回桌面，同时打印身份档案
+
+function smsOpen() {
+  const e = D.ent;
+  if (!e || e.leaving) return;
+  if (e.smsSent) { toast('已经发过验证 SMS 了', K.AMBER); return; }
+  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  e.measureUsed = true;   // 措施按下后锁定，直到比对出新的异常并重新询问
+  e.measureReady = false;
+  const w = D.wins.find((o) => o.kind === 'smsf');
+  if (w) { raise(w); return; }
+  const win = new InfoWin('smsf', '验证 SMS', 'SMS', [['', '将此表单交给用户'], ['手机', '________________']]);
+  addWin(win, 'smsf', ...clampDesk(236, 160, win));
+  SFX.play('select');
+  toast('把表单拖到头像上，发给对方填写', K.GREEN);
+}
+
+function smsSend(w) {
+  const e = D.ent;
+  if (!e || e.leaving) return;
+  e.smsSent = true;
+  D.wins = D.wins.filter((o) => o !== w);
+  SFX.play('select', 0.6);
+  say('C', '请填写你的手机号码。');
+  const s = e.spec.sms;
+  later(1.0, () => {
+    if (D.ent !== e || e.leaving) return;
+    say('E', `我的手机号是 ${s.reply}。`);
+    w.win.rows = [['', '将此表单交给用户'], ['手机', s.reply, true]];
+    w.win.layout();
+    addWin(w.win, 'smsf', ...clampDesk(236, 160, w.win));
+    SFX.play('select');
+  });
+  later(1.6, () => {
+    if (D.ent !== e || e.leaving) return;
+    const rec = new InfoWin('sms', '身份档案', 'RECORD', [['昵称', e.spec.handle, true], ['手机', s.phone, true], ['曾用名', s.names.join('、'), true]]);
+    addWin(rec, 'sms', ...clampDesk(250, 214, rec));
+    SFX.play('intercom', 0.6);
+    toast('身份档案已打印：核对手机号或曾用名', K.GREEN);
+  });
 }
 
 // ———————————————————— 绘制 ————————————————————
@@ -561,7 +693,7 @@ function drawDesk() {
   if (D.insp.on) drawInspect();
   if (!drawBanner()) drawToast();
   if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true);
-  if (drag && drag.type === 'win' && drag.inst.out && drag.inst.kind === 'doc') docIcon(ptr.x - 8, ptr.y - 6, true);
+  if (drag && drag.type === 'win' && drag.inst.out && (drag.inst.kind === 'doc' || drag.inst.kind === 'smsf')) docIcon(ptr.x - 8, ptr.y - 6, true);
   if (D.intro !== null) drawIntro();
   scanlines(0, 0, W - 1, H - 1, 0.12);
 }
@@ -572,15 +704,15 @@ function drawHud() {
   txt(6, 3, 'IP, PLEASE', 8, K.CLAUDE_L);
   txt(62, 3, `· 无尽 - ${mode().name}`, 8, K.CYAN);
   const parts = [];
-  if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`得分 ${RUN.score}`, K.GREEN], [`事故 ${RUN.incidents}`, RUN.incidents ? K.RED : K.DIM]);
-  if (RUN.mode === 'perfect') parts.push([`得分 ${RUN.score}`, K.WHITE], [`每单 +${unitValue()}`, K.GREEN], [`用时 ${mmss(elapsed())}`, K.DIM]);
+  if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`已审核 ${RUN.processed}`, K.GREEN]);
+  if (RUN.mode === 'perfect') parts.push([`用时 ${mmss(elapsed())}`, K.WHITE], [`得分 ${RUN.score}`, K.GREEN]);
   if (RUN.mode === 'story') {
     parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), D.closing ? K.AMBER : K.WHITE],
       [`今日正确 ${D.correct}`, K.GREEN], [`处分 ${D.cites}`, D.cites ? K.RED : K.DIM]);
   }
   if (RUN.mode === 'endure') {
-    parts.push([`得分 ${RUN.score}`, RUN.score < 0 ? K.RED : K.WHITE],
-      [`正确 ${RUN.correct}`, K.GREEN], [`失误 ${RUN.incidents}`, RUN.incidents ? K.RED : K.DIM]);
+    parts.push([`用时 ${mmss(elapsed())}`, K.WHITE],
+      [`Token ${RUN.score}`, RUN.score < 0 ? K.RED : K.GREEN]);
   }
   let x = W - 96;   // 右上角留给页面上的“声音 / 全屏”按钮
   for (const [s, col] of parts.reverse()) { txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
@@ -672,7 +804,7 @@ function drawReview() {
   const s = e && e.spec;
   [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && (s.kind === 'api' ? 'API 调用' : '对话')]].forEach(([k, v], i) => {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
-    txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? (k === '类型' && s.kind === 'api' ? K.AMBER : K.TEXT) : K.DIM_D);
+    txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? K.TEXT : K.DIM_D);
   });
   if (ready) {
     txt(RV_X, 178, '请求摘要', 8, K.DIM);
@@ -688,9 +820,16 @@ function drawReview() {
     wrap(ln.text, 10, x1 - x0 - 24).slice(0, 1).forEach((t) => txt(x0 + 12, y + 10, t, 10, i === lines.length - 1 ? K.WHITE : K.DIM));
   });
   rect(x0 + 8, 316, x1 - 8, 316, K.LINE);
-  // 柜台：下一位 + 证件图标 + 规则手册
-  const canCall = !e && !D.closing && !D.ended;
-  button(NEXT_BTN, '下一位', K.CYAN, { off: !canCall, hot: canCall && !D.hinted.next && Math.floor(now * 2) % 2 === 0 });
+  // 柜台：下一位 / 验证SMS / 拘留共用一个按钮。措施要先询问异常才解锁，按下后锁定
+  const canCall = !e && !D.closing && !D.over && !D.ended;
+  const smsOk = canSmsNow(e), suspendOk = canSuspendNow(e);
+  if (measureArmed(e) && (smsOk || suspendOk)) {
+    if (smsOk) button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, hot: Math.floor(now * 2) % 2 === 0 });
+    else button(NEXT_BTN, '拘留', K.RED, { hot: Math.floor(now * 3) % 2 === 0 });
+  } else if (e && !e.leaving && (e.measureUsed || smsOk || suspendOk)) {
+    if (e.measureUsed || smsOk) button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, off: true });
+    else button(NEXT_BTN, '拘留', K.RED, { off: true });
+  } else button(NEXT_BTN, '下一位', K.CYAN, { off: !canCall, hot: canCall && !D.hinted.next && Math.floor(now * 2) % 2 === 0 });
   for (const ic of D.icons) {
     if (drag && drag.inst === ic && drag.moved) continue;
     docIcon(ic.x, ic.y, ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)));
@@ -716,6 +855,14 @@ function drawAvatar(e, x, y, s) {
     }
   }
   scanlines(x, y, x + s - 1, y + s - 1, 0.25);
+  if (e.decided === 'suspend' && e.leaving) {
+    const a = seg(now, e.tLeave, e.tLeave + 0.2);
+    rect(x, y + s / 2 - 12, x + Math.round((s - 1) * a), y + s / 2 + 11, K.RED_D);
+    if (a >= 1) {
+      txt(x + s / 2, y + s / 2 - 9, '连接已切断', 8, K.WHITE, 'ma');
+      txt(x + s / 2, y + s / 2 + 1, '已拘留', 8, Math.floor(now * 4) % 2 ? K.RED : K.WHITE, 'ma');
+    }
+  }
 }
 
 // —— 右下：电脑桌面 ——
@@ -744,8 +891,16 @@ function drawScreen() {
   if (D.wins.some((w) => w.kind === 'doc')) D.hinted.drag = true;
   const e = D.ent;
   let hint = null;
-  if (e && e.decided && !e.leaving) hint = `◀ 已选${e.decided === 'approve' ? '放行' : '拦截'}：交还全部证件才判定，交还前可再盖章改选`;
-  else if (D.icons.length && !D.hinted.drag) hint = '◀ 把柜台上的证件拖到桌面上查看';
+  if (D.wins.some((w) => w.kind === 'smsf') && e && e.smsSent === undefined) hint = '◀ 把 SMS 表单拖到审查窗的头像上';
+  else if (measureArmed(e) && measureAvailable(e)) {
+    if (canSmsNow(e)) hint = '◀ 可以『验证SMS』（V），确认是不是本人';
+    else if (canSuspendNow(e)) hint = '◀ 可以按『拘留』切断连接（S），也可以照常拦截';
+  } else if (e && e.decided && !e.leaving) hint = `◀ 已选${e.decided === 'approve' ? '放行' : '拦截'}：交还全部证件才判定，交还前可再盖章改选`;
+  else if (measureAvailable(e)) {
+    const b = D.insp.banner;
+    const newIssue = b && b.ok && !e.asked.has(b.issue);
+    hint = e.measureUsed && !newIssue ? '◀ 措施已按下：再比对出新的异常，才能重新询问' : '◀ 先点『询问』异常，再采取措施';
+  } else if (D.icons.length && !D.hinted.drag) hint = '◀ 把柜台上的证件拖到桌面上查看';
   else if (e && e.handed && !e.decided && !D.hinted.stamp) hint = '把凭证拖到桌面右边缘，放进 放行 / 拦截 栏 ▶';
   if (hint && !D.insp.on) txt(x0 + 6, TASKBAR[1] - 12, hint, 8, K.AMBER);
   drawTaskbar();
@@ -766,7 +921,7 @@ function drawAppIcons() {
 }
 
 // 任务栏：每个桌面窗口一个按钮（色块 + 名字）
-const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN };
+const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN, smsf: C.GREEN, sms: C.GREEN };
 function drawTaskbar() {
   rect(...TASKBAR, K.PANEL);
   rect(TASKBAR[0], TASKBAR[1], TASKBAR[2], TASKBAR[1], K.LINE_L);
@@ -822,7 +977,7 @@ function drawInspect() {
     return [Math.max(b[0], view[0]), Math.max(b[1], view[1]), Math.min(b[2], view[2]), Math.min(b[3], view[3])];
   }).filter((b) => b[2] >= b[0] && b[3] >= b[1]);
   const holes = vis.map((f) => (f.w ? [Math.max(f.box[0], view[0]), Math.max(f.box[1], view[1]), Math.min(f.box[2], view[2]), Math.min(f.box[3], view[3])] : f.box))
-    .filter((b) => b[2] >= b[0] && b[3] >= b[1]).concat(hist, [INSPECT_ICON]);
+    .filter((b) => b[2] >= b[0] && b[3] >= b[1]).concat(hist, [INSPECT_ICON], canSuspendNow(D.ent) ? [NEXT_BTN] : []);
   if (!OVERLAY) OVERLAY = makeCanvas(W, H);
   const [oc, og] = OVERLAY;
   og.clearRect(0, 0, W, H);
@@ -855,7 +1010,10 @@ function drawBanner() {
   txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 4, b.title, 10, col);
   txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 17, b.sub, 8, K.TEXT);
   const e = D.ent;
-  if (b.ok && e && !e.leaving) button(ASK_BTN, e.asked.has(b.issue) ? '已询问' : '询问', K.AMBER, { size: 8, off: e.asked.has(b.issue) });
+  if (b.ok && e && !e.leaving) {
+    const asked = e.asked.has(b.issue);   // 问过的异常固定为已按下；比对出新异常才会重新变成询问
+    button(ASK_BTN, asked ? '已询问' : '询问', K.AMBER, { size: 8, off: asked });
+  }
   return true;
 }
 
@@ -930,11 +1088,41 @@ function drawClawdsUnder() {
   G.restore();
 }
 
-// 检查站上层：红队 clawd（左边那位全程待机）
+// 拘留动画：左上的红队 clawd 走到检查站左侧，把请求从窗口里拖出来，押着往上带出画面，再从上方走回岗位。
+// 岔路口的两名红队 clawd 只是装饰，不参与
+const ARREST = { rush: [0, 0.6], grab: [0.6, 0.9], escort: [1.0, 2.0], back: [2.3, 3.3] };
+const ARREST_AT = [GATE[0] - 22, LANE_Y - 18];   // 检查站左侧、道路上方（clawd 左上角）
+const ARREST_OUT = PIPE[1] - 40;                 // 押出画面上方
+function arrestPose(t) {
+  const A = ARREST, [px, py] = RED_POST, [ax, ay] = ARREST_AT;
+  let x, y, moving = true;
+  if (t < A.rush[1]) { const u = smooth(seg(t, ...A.rush)); x = lerp(px, ax, u); y = lerp(py, ay, u); }
+  else if (t < A.escort[0]) { x = ax; y = ay; moving = false; }
+  else if (t < A.back[0]) { x = ax; y = lerp(ay, ARREST_OUT, seg(t, ...A.escort)); }
+  else { x = px; y = lerp(ARREST_OUT, py, seg(t, ...A.back)); moving = t < A.back[1]; }
+  // 请求：先从检查站正中被拖到 clawd 脚下，之后跟着 clawd 走
+  let pkt = null;
+  if (t >= A.grab[0] && t < A.back[0]) {
+    const u = seg(t, ...A.grab), hold = [x + 6, y + 21];
+    pkt = t < A.grab[1] ? [lerp(((GATE[0] + GATE[2]) >> 1) - 5, hold[0], u), lerp(LANE_Y, hold[1], u)] : hold;
+  }
+  return { guard: [x, y, moving], pkt };
+}
+
+// 检查站上层：红队 clawd。左上那位平时待机、拘留时出动；岔路口的两位纯装饰
 function drawClawds() {
   clipPipe();
   for (const [x, y] of RED_GUARDS) clawd(x, y, K.RED);
-  clawd(RED_POST[0], RED_POST[1], K.RED);
+  const t = D.arrest ? now - D.arrest.t0 : Infinity;
+  if (t < ARREST.back[1]) {
+    const p = arrestPose(t);
+    if (p.pkt) {
+      const [x, y] = p.pkt.map(Math.round);
+      rect(x, y - 4, x + 10, y + 4, Math.floor(now * 6) % 2 ? K.RED_D : K.RED);
+      outline(x, y - 4, x + 10, y + 4, K.RED);
+    }
+    clawd(...p.guard.slice(0, 2), K.RED, p.guard[2]);
+  } else clawd(RED_POST[0], RED_POST[1], K.RED);
   G.restore();
 }
 

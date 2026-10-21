@@ -7,7 +7,7 @@ function loadRecords() {
   try { return JSON.parse(localStorage.getItem(RECORD_KEY) || '{}'); } catch (e) { return {}; }
 }
 
-// 各模式只记最好成绩：限时 / 完美 / 持久 = 分数，故事 = 天数
+// 各模式只记最好成绩：限时 / 完美 / 耐力 = 分数，故事 = 天数
 function saveRecord() {
   const r = loadRecords();
   const v = RUN.mode === 'story' ? RUN.day : RUN.score;
@@ -19,7 +19,7 @@ function saveRecord() {
   }
 }
 
-const recordLabel = (m, v) => (m === 'story' ? `最佳：撑到 DAY ${v}` : `最佳：${v} 分`);
+const recordLabel = (m, v) => (m === 'story' ? `最佳：撑到 DAY ${v}` : `最佳：${v} ${m === 'endure' ? 'token' : '分'}`);
 
 // ———————————————————— 开机 ————————————————————
 
@@ -230,16 +230,19 @@ function summaryClick(x, y) {
 function drawResult(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
   const m = RUN.mode;
-  const title = m === 'timed' ? '时间到' : m === 'perfect' ? '完美模式结束' : m === 'endure' ? '分数为负' : '节点停机';
-  bigText(W / 2, 40, title, 12, 3, m === 'timed' ? K.CYAN_L : K.RED);
+  // 三种无尽模式统一用「游戏结束」；故事模式仍是停机
+  const title = m === 'story' ? '节点停机' : '游戏结束';
+  bigText(W / 2, 40, title, 12, 3, RUN.fail ? K.RED : K.CYAN_L);
   if (t < 0.5) return;
   let y = 100;
   const row = (a, b, col = K.WHITE) => { txt(220, y, a, 12, K.DIM); txt(420, y, b, 12, col, 'ra'); y += 18; };
-  if (m === 'timed') { row('得分', `${RUN.score}`, K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); row('事故', `${RUN.incidents}`, RUN.incidents ? K.RED : K.WHITE); }
-  if (m === 'perfect') { row('得分', `${RUN.score}`, K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); }
-  if (m === 'endure') { row('得分', `${RUN.score}`, RUN.score < 0 ? K.RED : K.CLAUDE_L); row('正确处理', `${RUN.correct}`, K.GREEN); row('事故', `${RUN.incidents}`, RUN.incidents ? K.RED : K.WHITE); }
+  // 结算只显示该模式该看的东西：限时看分数；完美 / 耐力看用时和分数
+  if (m === 'timed') row('得分', `${RUN.score}`, K.CLAUDE_L);
+  if (m === 'perfect') { row('用时', mmss(RUN.time), K.WHITE); row('得分', `${RUN.score}`, K.CLAUDE_L); }
+  if (m === 'endure') { row('用时', mmss(RUN.time), K.WHITE); row('最高 token', `${RUN.score}`, K.CLAUDE_L); }
   if (m === 'story') { row('坚持天数', `${RUN.day}`, K.CLAUDE_L); row('累计正确', `${RUN.correct}`, K.GREEN); row('累计事故', `${RUN.incidents}`); }
-  if (RUN.fail) { y += 6; RUN.fail.forEach((s) => { txt(W / 2, y, s, 10, K.RED, 'ma'); y += 14; }); }
+  // 完美 / 耐力不显示事故原因的红字；故事模式的停机原因保留
+  if (m === 'story' && RUN.fail) { y += 6; RUN.fail.forEach((s) => { txt(W / 2, y, s, 10, K.RED, 'ma'); y += 14; }); }
   if (t > 1.0) {
     if (RUN.newBest || RUN.best) txt(W / 2, 262, RUN.newBest ? '新纪录！' : recordLabel(m, RUN.best), 12, RUN.newBest ? K.AMBER : K.DIM, 'ma');
     button(RESTART_BTN, '再来一局', K.CYAN);

@@ -70,43 +70,107 @@ class Doc {
   }
 }
 
-// 《规则手册》：第 1 页规则，第 2 页合法签名式样
+// 《宪法与规则手册》：封面、目录、基本条例、支持地区、签名详情、版权页、封底；底部一排书签直接跳到各章
+const MARK_H = 12;
 class Rulebook {
   constructor() {
     this.w = 212;
     this.title = '规则手册';
     this.closable = true;
-    this.npages = 2;
-    const p0 = [], f0 = {};
-    let y = TITLE_H + 5;
+    const W2 = this.w / 2;
+    // 每页一组行：{s, y, col, x?, size?, anchor?} 或 {seal, y}；fields 是比对用的栏位，links 是目录里可点的条目
+    const page = () => ({ rows: [], fields: {}, links: [] });
+    const mid = (pg, y, s, size, col) => pg.rows.push({ s, y, col, x: W2, size, anchor: 'ma' });
+    const head = (pg, s) => { pg.rows.push({ s, y: TITLE_H + 5, col: K.CLAUDE_L }); return TITLE_H + 19; };
+
+    const [cover, toc, rules, regions, seals, owner, back] = this.pages = [page(), page(), page(), page(), page(), page(), page()];
+    mid(cover, 26, '安索兹卡', 12, K.CLAUDE_L);
+    mid(cover, 42, '安全部', 10, K.TEXT);
+    mid(cover, 66, '宪法', 12, K.WHITE);
+    mid(cover, 82, '与', 8, K.DIM);
+    mid(cover, 94, '规则手册', 12, K.WHITE);
+    mid(cover, 122, '安全模型专用', 8, K.CYAN);
+
+    let y = head(toc, '目录');
+    [['一、基本条例', rules], ['二、支持地区', regions], ['三、签名详情', seals]].forEach(([s, pg]) => {
+      toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
+      toc.links.push({ box: [3, y - 3, this.w - 4, y + 10], page: this.pages.indexOf(pg) });
+      y += 16;
+    });
+
+    y = head(rules, '一、基本条例');
+    // hidden 的条例（wanted / sms）不印在手册上、不占版面，也不登记比对栏位
     for (const r of RULES) {
+      if (r.hidden) continue;
       const y0 = y;
-      p0.push({ s: r.head, y, col: K.CYAN });
+      rules.rows.push({ s: r.head, y, col: K.CYAN });
       y += 12;
-      for (const s of r.subs || []) for (const ln of wrap(s, 8, this.w - 20)) { p0.push({ s: ln, y, col: K.DIM, indent: true }); y += 10; }
-      f0['rule.' + r.key] = [3, y0 - 2, this.w - 4, y - 2];
+      rules.fields['rule.' + r.key] = [3, y0 - 2, this.w - 4, y - 2];
       y += 3;
     }
-    const h0 = y + 2;
-    const p1 = [], f1 = {};
-    y = TITLE_H + 5;
-    p1.push({ s: '合法签名式样', y, col: K.CLAUDE_L });
-    y += 14;
+    let h = y + 2;
+
+    y = head(regions, '二、支持地区');
+    const y0 = y;
+    for (const [s, x] of [['地区', 14], ['语言', 84], ['时区', 140]]) regions.rows.push({ s, y, col: K.DIM, x });
+    y += 13;
+    for (const [continent, list] of CONTINENTS) {
+      regions.rows.push({ s: continent, y, col: K.CYAN });
+      y += 11;
+      for (const r of list) {
+        const [lang, tz] = REGION_LOCALE[r];
+        regions.rows.push({ s: r, y, col: K.TEXT, x: 14 }, { s: lang, y, col: K.TEXT, x: 84 }, { s: tz, y, col: K.TEXT, x: 140 });
+        y += 10;
+      }
+      y += 3;
+    }
+    regions.fields['rule.region'] = [3, y0 - 2, this.w - 4, y - 4];
+    h = Math.max(h, y + 2);
+
+    y = head(seals, '三、签名详情');
     for (const key of ['cred', 'tok', 'api']) {
-      p1.push({ s: DOC_NAMES[key], y, col: K.CYAN });
-      p1.push({ seal: key, y: y + 10 });
-      f1['book.' + key] = [3, y - 2, this.w - 4, y + 31];
+      seals.rows.push({ s: DOC_NAMES[key], y, col: K.CYAN }, { seal: key, y: y + 10 });
+      seals.fields['book.' + key] = [3, y - 2, this.w - 4, y + 31];
       y += 36;
     }
-    this.pages = [{ rows: p0, fields: f0 }, { rows: p1, fields: f1 }];
-    this.h = Math.max(h0, y + 2);
-    this.page = 0;
+    h = Math.max(h, y + 2);
+
+    mid(owner, 52, '本手册所有权属于', 8, K.DIM);
+    mid(owner, 65, '安全部', 10, K.TEXT);
+    mid(owner, 100, '安全属于安索兹卡', 8, K.CLAUDE_L);
+
+    mid(back, 20, '安索兹卡', 10, K.CLAUDE_L);
+    mid(back, 34, '安全部', 8, K.TEXT);
+    mid(back, 46, '安全模型专用', 8, K.CYAN);
+    mid(back, 58, '宪法与规则手册', 10, K.WHITE);
+    mid(back, 80, '2060版', 8, K.AMBER);
+    mid(back, 102, '不得擅自传播', 8, K.RED);
+    mid(back, 114, '否则将受到', 8, K.RED);
+    mid(back, 126, '严厉处罚', 8, K.RED);
+
+    this.npages = this.pages.length;
+    this.h = Math.max(h, 140) + MARK_H + 2;
+    this.home = this.pages.indexOf(toc);   // 目录页：手册每次从桌面打开时默认停在这里
+    this.page = this.home;
     this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
+    const marks = [['目录', toc, K.CLAUDE], ['条例', rules, K.CYAN], ['地区', regions, K.GREEN], ['签名', seals, K.AMBER]];
+    const mw = Math.floor((this.w - 8) / marks.length);
+    this.marks = marks.map(([label, pg, col], i) => ({
+      label, col, page: this.pages.indexOf(pg), box: [4 + i * mw, this.h - MARK_H - 2, 2 + (i + 1) * mw, this.h - 3],
+    }));
   }
 
   get fields() { return this.pages[this.page].fields; }
 
   flip() { this.page = (this.page + 1) % this.npages; }
+
+  // 点页签翻到下一页，点书签 / 目录条目跳到那一页；点中了返回 true
+  press(rx, ry) {
+    if (inBox(rx, ry, this.tab)) { this.flip(); return true; }
+    const l = [...this.marks, ...this.pages[this.page].links].find((l) => inBox(rx, ry, l.box));
+    if (l) this.page = l.page;
+    return !!l;
+  }
 
   draw(x, y) {
     winChrome(x, y, this.w, this.h, this.title, '', K.CLAUDE, rgb([70, 36, 26]), true);
@@ -114,29 +178,105 @@ class Rulebook {
     txt(x + this.tab[2] - 5, y + 2, `${this.page + 1}/${this.npages} ▶`, 8, K.WHITE, 'ra');
     for (const r of this.pages[this.page].rows) {
       if (r.seal) drawSeal(x + 8, y + r.y, r.seal, genuine(r.seal));
-      else txt(x + (r.indent ? 14 : 6), y + r.y, r.s, 8, r.col);
+      else txt(x + (r.x ?? 6), y + r.y, r.s, r.size || 8, r.col, r.anchor);
+    }
+    rect(x + 1, y + this.h - MARK_H - 4, x + this.w - 2, y + this.h - MARK_H - 4, K.GRID);
+    for (const m of this.marks) {
+      const [x0, y0, x1, y1] = m.box, on = m.page === this.page;
+      rect(x + x0, y + y0 + (on ? 0 : 2), x + x1, y + y1, on ? m.col : K.INK);
+      outline(x + x0, y + y0 + (on ? 0 : 2), x + x1, y + y1, m.col);
+      txt(x + (x0 + x1) / 2, y + y0 + (on ? 2 : 3), m.label, 8, on ? K.INK : m.col, 'ma');
     }
   }
 }
 
-// 安全部官方通告（每次上岗时弹出）
+// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文 + 令牌签名指纹，第 2 页特别关注对象的头像
 class OfficialNotice {
-  constructor(date, title, body) {
+  constructor(date, title, body, wanted) {
     this.w = 220;
     this.title = '通告';
     this.closable = true;
+    this.wanted = wanted;
     const L = [[`安索兹卡 ${date}`, K.DIM, 'ma'], ['安全部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
       [title, K.WHITE], null, ...wrap(body, 8, this.w - 20).map((s) => [s, K.TEXT]), null,
       ['翻阅规则手册查看生效的策略。', K.CYAN], null, ['安全归于ANTHROTZKA', K.CLAUDE_L, 'ma']];
     let y = TITLE_H + 7;
-    this.lines = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
-    this.h = y + 4;
-    this.fields = {};
+    const lines0 = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
+    // 底部：安全部会话中心（令牌签发机构）的有效签名指纹
+    y += 4;
+    const f0 = { 'notice.tok': [3, y - 2, this.w - 4, y + 20] };
+    lines0.push({ s: `${SIGNERS.tok.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
+      { s: SIGNERS.tok.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
+    const h0 = y + 26;
+
+    y = TITLE_H + 7;
+    const lines1 = [{ s: '特别关注对象', col: K.RED, anchor: 'ma', y }];
+    y += 15;
+    y += 6;
+    const f1 = {};
+    this.avY = y;
+    this.avX = wanted.map((_, i) => 20 + i * 66);
+    this.avX.forEach((ax, i) => {
+      f1[`notice.wanted${i}`] = [ax - 3, y - 3, ax + 48, y + 59];
+      lines1.push({ s: `对象 ${WANTED_TAGS[i]}`, col: K.RED, anchor: 'ma', y: y + 50, x: ax + 23 });
+    });
+    y += 66;
+    lines1.push({ s: '安全归于ANTHROTZKA', col: K.CLAUDE_L, anchor: 'ma', y: y + 4 });
+    this.pages = [{ lines: lines0, fields: f0 }, { lines: lines1, fields: f1, avatars: true }];
+    this.npages = 2;
+    this.page = 0;
+    this.h = Math.max(h0, y + 20);
+    this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
+  }
+
+  get fields() { return this.pages[this.page].fields; }
+
+  flip() { this.page = (this.page + 1) % this.npages; }
+
+  press(rx, ry) {
+    if (!inBox(rx, ry, this.tab)) return false;
+    this.flip();
+    return true;
   }
 
   draw(x, y) {
     winChrome(x, y, this.w, this.h, '通告 NOTICE', '', K.CLAUDE, rgb([70, 36, 26]), true);
-    for (const l of this.lines) txt(l.anchor === 'ma' ? x + this.w / 2 : x + 10, y + l.y, l.s, 8, l.col, l.anchor);
+    rect(x + this.tab[0], y + 1, x + this.tab[2], y + this.tab[3], rgb([110, 56, 40]));
+    txt(x + this.tab[2] - 5, y + 2, `${this.page + 1}/${this.npages} ▶`, 8, K.WHITE, 'ra');
+    const pg = this.pages[this.page];
+    for (const l of pg.lines) {
+      if (l.rule) rect(x + 10, y + l.y - 5, x + this.w - 11, y + l.y - 5, K.GRID);
+      txt(l.x !== undefined ? x + l.x : l.anchor === 'ma' ? x + this.w / 2 : x + 10, y + l.y, l.s, 8, l.col, l.anchor);
+    }
+    if (!pg.avatars) return;
+    this.wanted.forEach((av, i) => {
+      const ax = x + this.avX[i], ay = y + this.avY;
+      frame(ax - 2, ay - 2, ax + 45, ay + 45, K.RED, K.INK);
+      spr(av, ax, ay, 2);
+    });
+  }
+}
+
+// 验证 SMS 的两扇窗：发给对方填的表单（smsf）、按凭证查到的身份档案（sms）。行和栏位的排法同证件
+class InfoWin {
+  constructor(key, title, sub, rows) {
+    Object.assign(this, { key, title, sub, rows, closable: true, w: 164 });
+    this.layout();
+  }
+
+  layout() {
+    this.h = TITLE_H + 6 + 12 * this.rows.length + 4;
+    this.fields = {};
+    this.rows.forEach(([k, v, field], i) => { if (field) this.fields[`${this.key}.${k}`] = [3, TITLE_H + 2 + 12 * i, this.w - 4, TITLE_H + 13 + 12 * i]; });
+  }
+
+  draw(x, y) {
+    winChrome(x, y, this.w, this.h, this.title, this.sub, K.GREEN, rgb([20, 50, 34]), true);
+    this.rows.forEach(([k, v], i) => {
+      const yy = y + TITLE_H + 4 + i * 12;
+      txt(x + 6, yy, k, 8, K.DIM);
+      txt(x + 42, yy, v, 8, v.startsWith('_') ? K.DIM_D : K.TEXT);
+    });
   }
 }
 
@@ -159,7 +299,8 @@ class NoticeWindow {
 }
 
 // 历史记录：当前这段对话（下一个请求进来时清空）。
-// 请求内容那一句是可比对栏位（hist.请求），拿来和 API 授权的用途核对。
+// 请求内容那一句是可比对栏位（hist.请求）；审查窗的请求摘要（rv.请求）一直看得到，
+// 两者都能拿来和 API 授权的用途核对。
 class HistoryLog {
   constructor(chat) {
     this.chat = chat;   // 直接引用 D.chat：新请求时清空、对话时实时追加
