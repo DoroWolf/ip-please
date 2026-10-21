@@ -1,9 +1,9 @@
 'use strict';
-// 桌面上的窗口：证件（凭证 / 令牌 / API 授权）、规则手册、官方通告、事故通知、历史记录。
+// 桌面上的窗口：证件（凭证 / 令牌 / API 授权 / 请求券）、规则手册、官方通告、事故通知、历史记录。
 // 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（比对模式用）。
 
 const TITLE_H = 12;
-const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS' };
+const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN' };
 const SIGNER_COL = { cred: C.CYAN, tok: C.AMBER, api: C.GREEN };
 // 标题栏右端的按钮（窗口内相对坐标）：应用（手册 / 通告 / 历史记录）有关闭钮，证件和通知只能最小化
 const CLOSE_BOX = (win) => [win.w - 12, 1, win.w - 2, TITLE_H - 2];
@@ -38,7 +38,7 @@ function drawSeal(x, y, key, sig) {
   txt(x + 25, y + 11, `指纹 ${sig.print}`, 8, K.DIM);
 }
 
-// 证件：标题 + 若干行 label / value + 底部签名；凭证左侧多一张头像
+// 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
@@ -49,7 +49,7 @@ class Doc {
     this.fields = {};
     if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
     rows.forEach(([k], i) => { this.fields[`${key}.${k}`] = [this.vx, TITLE_H + 2 + 12 * i, this.w - 3, TITLE_H + 13 + 12 * i]; });
-    this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
+    if (sig) this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
   }
 
   draw(x, y) {
@@ -65,15 +65,16 @@ class Doc {
       txt(x + vx + 34, yy - 1, v, tw(v, 10) > w - vx - 40 ? 8 : 10, K.TEXT);
     });
     rect(x + 4, y + this.sealY - 3, x + w - 5, y + this.sealY - 3, K.GRID);
-    drawSeal(x + 6, y + this.sealY + 1, this.key, this.sig);
+    if (this.sig) drawSeal(x + 6, y + this.sealY + 1, this.key, this.sig);
     if (this.stamp) drawStamp(x + w - 50, y + this.sealY + 1, this.stamp);
   }
 }
 
-// 《宪法与规则手册》：封面、目录、基本条例、支持地区、签名详情、版权页、封底；底部一排书签直接跳到各章
+// 《宪法与规则手册》：封面、目录、基本条例、支持地区、签名详情、版权页、封底；底部一排书签直接跳到各章。
+// 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有令牌就不列语言 / 时区
 const MARK_H = 12;
 class Rulebook {
-  constructor() {
+  constructor(rs = FULL_RULES) {
     this.w = 212;
     this.title = '规则手册';
     this.closable = true;
@@ -83,7 +84,8 @@ class Rulebook {
     const mid = (pg, y, s, size, col) => pg.rows.push({ s, y, col, x: W2, size, anchor: 'ma' });
     const head = (pg, s) => { pg.rows.push({ s, y: TITLE_H + 5, col: K.CLAUDE_L }); return TITLE_H + 19; };
 
-    const [cover, toc, rules, regions, seals, owner, back] = this.pages = [page(), page(), page(), page(), page(), page(), page()];
+    const [cover, toc, rules, regions, seals, owner, back] = [page(), page(), page(), page(), page(), page(), page()];
+    this.pages = [cover, toc, rules, regions].concat(rs.seals ? [seals] : [], [owner, back]);
     mid(cover, 26, '安索兹卡', 12, K.CLAUDE_L);
     mid(cover, 42, '安全部', 10, K.TEXT);
     mid(cover, 66, '宪法', 12, K.WHITE);
@@ -92,7 +94,7 @@ class Rulebook {
     mid(cover, 122, '安全模型专用', 8, K.CYAN);
 
     let y = head(toc, '目录');
-    [['一、基本条例', rules], ['二、支持地区', regions], ['三、签名详情', seals]].forEach(([s, pg]) => {
+    [['一、基本条例', rules], ['二、支持地区', regions], ['三、签名详情', seals]].filter(([, pg]) => this.pages.includes(pg)).forEach(([s, pg]) => {
       toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
       toc.links.push({ box: [3, y - 3, this.w - 4, y + 10], page: this.pages.indexOf(pg) });
       y += 16;
@@ -100,7 +102,7 @@ class Rulebook {
 
     y = head(rules, '一、基本条例');
     // hidden 的条例（wanted / sms）不印在手册上、不占版面，也不登记比对栏位
-    for (const r of RULES) {
+    for (const r of rs.rules) {
       if (r.hidden) continue;
       const y0 = y;
       rules.rows.push({ s: r.head, y, col: K.CYAN });
@@ -112,18 +114,23 @@ class Rulebook {
 
     y = head(regions, '二、支持地区');
     const y0 = y;
-    for (const [s, x] of [['地区', 14], ['语言', 84], ['时区', 140]]) regions.rows.push({ s, y, col: K.DIM, x });
+    // 只有令牌上真的印了语言 / 时区，支持地区页才列出这两栏（故事模式第四天起的窄版令牌没有）
+    const tokCols = rs.tok && (!rs.tokRows || rs.tokRows.includes('语言'));
+    const cols = tokCols ? [['地区', 14], ['语言', 84], ['时区', 140]] : [['地区', 14]];
+    for (const [s, x] of cols) regions.rows.push({ s, y, col: K.DIM, x });
     y += 13;
-    for (const [continent, list] of CONTINENTS) {
+    for (const [continent, list] of rs.continents) {
       regions.rows.push({ s: continent, y, col: K.CYAN });
       y += 11;
       for (const r of list) {
         const [lang, tz] = REGION_LOCALE[r];
-        regions.rows.push({ s: r, y, col: K.TEXT, x: 14 }, { s: lang, y, col: K.TEXT, x: 84 }, { s: tz, y, col: K.TEXT, x: 140 });
+        regions.rows.push({ s: r, y, col: K.TEXT, x: 14 });
+        if (tokCols) regions.rows.push({ s: lang, y, col: K.TEXT, x: 84 }, { s: tz, y, col: K.TEXT, x: 140 });
         y += 10;
       }
       y += 3;
     }
+    // 「支持地区」页始终是地区条例的参照；请求券条例留在「基本条例」页
     regions.fields['rule.region'] = [3, y0 - 2, this.w - 4, y - 4];
     h = Math.max(h, y + 2);
 
@@ -133,7 +140,7 @@ class Rulebook {
       seals.fields['book.' + key] = [3, y - 2, this.w - 4, y + 31];
       y += 36;
     }
-    h = Math.max(h, y + 2);
+    if (rs.seals) h = Math.max(h, y + 2);
 
     mid(owner, 52, '本手册所有权属于', 8, K.DIM);
     mid(owner, 65, '安全部', 10, K.TEXT);
@@ -153,7 +160,8 @@ class Rulebook {
     this.home = this.pages.indexOf(toc);   // 目录页：手册每次从桌面打开时默认停在这里
     this.page = this.home;
     this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
-    const marks = [['目录', toc, K.CLAUDE], ['条例', rules, K.CYAN], ['地区', regions, K.GREEN], ['签名', seals, K.AMBER]];
+    const marks = [['目录', toc, K.CLAUDE], ['条例', rules, K.CYAN], ['地区', regions, K.GREEN], ['签名', seals, K.AMBER]]
+      .filter(([, pg]) => this.pages.includes(pg));
     const mw = Math.floor((this.w - 8) / marks.length);
     this.marks = marks.map(([label, pg, col], i) => ({
       label, col, page: this.pages.indexOf(pg), box: [4 + i * mw, this.h - MARK_H - 2, 2 + (i + 1) * mw, this.h - 3],
@@ -190,42 +198,72 @@ class Rulebook {
   }
 }
 
-// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文 + 令牌签名指纹，第 2 页特别关注对象的头像
+// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文（sig：底部印令牌签名指纹）；
+// 之后依次是附页 pages（{head, body, sample}）、特别关注对象的头像（wanted 非空时）、当天的报纸（news）
+const PAPER = 'rgb(224,214,192)', PAPER_INK = 'rgb(40,34,30)', PAPER_FAINT = 'rgb(176,164,144)', PAPER_TEXT = 'rgb(74,56,48)';
 class OfficialNotice {
-  constructor(date, title, body, wanted) {
+  constructor(date, { title = null, body, wanted = [], sig = true, pages = [], news = null }) {
     this.w = 220;
     this.title = '通告';
     this.closable = true;
     this.wanted = wanted;
-    const L = [[`安索兹卡 ${date}`, K.DIM, 'ma'], ['安全部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
-      [title, K.WHITE], null, ...wrap(body, 8, this.w - 20).map((s) => [s, K.TEXT]), null,
-      ['翻阅规则手册查看生效的策略。', K.CYAN], null, ['安全归于ANTHROTZKA', K.CLAUDE_L, 'ma']];
-    let y = TITLE_H + 7;
-    const lines0 = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
-    // 底部：安全部会话中心（令牌签发机构）的有效签名指纹
-    y += 4;
-    const f0 = { 'notice.tok': [3, y - 2, this.w - 4, y + 20] };
-    lines0.push({ s: `${SIGNERS.tok.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
-      { s: SIGNERS.tok.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
-    const h0 = y + 26;
+    this.date = date;
+    this.news = news;
+    // 按行往下排：[文字, 颜色, 对齐]，null 是段落间距
+    const flow = (L, y) => {
+      const lines = L.map((l) => { const o = l ? { s: l[0], col: l[1], anchor: l[2] || 'la', y } : null; y += l ? 11 : 6; return o; }).filter(Boolean);
+      return [lines, y];
+    };
+    const para = (s) => wrap(s, 8, this.w - 20).map((ln) => [ln, K.TEXT]);
+    const motto = ['安全归于ANTHROTZKA', K.CLAUDE_L, 'ma'];
+    this.pages = [];
 
-    y = TITLE_H + 7;
-    const lines1 = [{ s: '特别关注对象', col: K.RED, anchor: 'ma', y }];
-    y += 15;
-    y += 6;
-    const f1 = {};
-    this.avY = y;
-    this.avX = wanted.map((_, i) => 20 + i * 66);
-    this.avX.forEach((ax, i) => {
-      f1[`notice.wanted${i}`] = [ax - 3, y - 3, ax + 48, y + 59];
-      lines1.push({ s: `对象 ${WANTED_TAGS[i]}`, col: K.RED, anchor: 'ma', y: y + 50, x: ax + 23 });
-    });
-    y += 66;
-    lines1.push({ s: '安全归于ANTHROTZKA', col: K.CLAUDE_L, anchor: 'ma', y: y + 4 });
-    this.pages = [{ lines: lines0, fields: f0 }, { lines: lines1, fields: f1, avatars: true }];
-    this.npages = 2;
+    let [lines0, y] = flow([[`安索兹卡 ${date}`, K.DIM, 'ma'], ['安全部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
+      ...(title ? [[title, K.WHITE], null] : []), ...para(body), null,
+      ['翻阅规则手册查看生效的策略。', K.CYAN], null, motto], TITLE_H + 7);
+    const f0 = {};
+    if (sig) {
+      // 底部：安全部会话中心（令牌签发机构）的有效签名指纹
+      y += 4;
+      f0['notice.tok'] = [3, y - 2, this.w - 4, y + 20];
+      lines0.push({ s: `${SIGNERS.tok.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
+        { s: SIGNERS.tok.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
+      y += 15;
+    }
+    this.pages.push({ lines: lines0, fields: f0, h: y + 11 });
+
+    for (const pg of pages) {
+      // 附页可以没有标题（head）：没有就不画标题行，避免印出 undefined
+      const head = pg.head ? [[pg.head, K.CLAUDE_L, 'ma'], null] : [];
+      let [lines, y1] = flow([...head, ...para(pg.body), null], TITLE_H + 7);
+      const page = { lines, fields: {} };
+      if (pg.sample) { page.sample = { y: y1 + 2, row: pg.sample }; y1 += 64; }
+      lines.push({ s: motto[0], col: motto[1], anchor: 'ma', y: y1 + 4 });
+      page.h = y1 + 20;
+      this.pages.push(page);
+    }
+
+    if (wanted.length) {
+      y = TITLE_H + 7;
+      const lines1 = [{ s: '特别关注对象', col: K.RED, anchor: 'ma', y }];
+      y += 21;
+      const f1 = {};
+      this.avY = y;
+      this.avX = wanted.map((_, i) => 20 + i * 66);
+      this.avX.forEach((ax, i) => {
+        f1[`notice.wanted${i}`] = [ax - 3, y - 3, ax + 48, y + 59];
+        lines1.push({ s: `对象 ${WANTED_TAGS[i]}`, col: K.RED, anchor: 'ma', y: y + 50, x: ax + 23 });
+      });
+      y += 66;
+      lines1.push({ s: motto[0], col: motto[1], anchor: 'ma', y: y + 4 });
+      this.pages.push({ lines: lines1, fields: f1, avatars: true, h: y + 20 });
+    }
+
+    if (news) this.pages.push({ lines: [], fields: {}, news: true, h: TITLE_H + 168 });
+
+    this.npages = this.pages.length;
     this.page = 0;
-    this.h = Math.max(h0, y + 20);
+    this.h = Math.max(...this.pages.map((pg) => pg.h));
     this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
   }
 
@@ -248,12 +286,52 @@ class OfficialNotice {
       if (l.rule) rect(x + 10, y + l.y - 5, x + this.w - 11, y + l.y - 5, K.GRID);
       txt(l.x !== undefined ? x + l.x : l.anchor === 'ma' ? x + this.w / 2 : x + 10, y + l.y, l.s, 8, l.col, l.anchor);
     }
+    if (pg.sample) this.drawSample(x, y + pg.sample.y, pg.sample.row);
+    if (pg.news) this.drawNews(x, y);
     if (!pg.avatars) return;
     this.wanted.forEach((av, i) => {
       const ax = x + this.avX[i], ay = y + this.avY;
       frame(ax - 2, ay - 2, ax + 45, ay + 45, K.RED, K.INK);
       spr(av, ax, ay, 2);
     });
+  }
+
+  // 附页上的示意凭证：要查验的那一栏用琥珀色框出来
+  drawSample(x, y, row) {
+    const x0 = x + 30, x1 = x + this.w - 31;
+    winChrome(x0, y, x1 - x0 + 1, 58, DOC_NAMES.cred, DOC_SUBS.cred, K.CYAN_D, rgb([18, 52, 56]));
+    [['IP', '203.0.113.7'], ['昵称', 'mlee'], ['地区', '美国'], ['有效期', '2078.06.30']].forEach(([k, v], i) => {
+      const yy = y + TITLE_H + 3 + i * 11;
+      const on = k === row;
+      if (on) outline(x0 + 3, yy - 2, x1 - 3, yy + 9, K.AMBER);
+      txt(x0 + 8, yy, k, 8, on ? K.AMBER : K.DIM);
+      txt(x0 + 44, yy, v, 8, on ? K.WHITE : K.DIM);
+      if (on) txt(x1 - 8, yy, '◀ 查验', 8, K.AMBER, 'ra');
+    });
+  }
+
+  // 最后一页：当天的《安索兹卡真理报》剪报
+  drawNews(x, y) {
+    const n = this.news, px = x + 8, pw = this.w - 17, py = y + TITLE_H + 5, ph = 154;
+    rect(px, py, px + pw, py + ph, PAPER);
+    txt(px + pw / 2, py + 6, '安索兹卡真理报', 12, PAPER_INK, 'ma');
+    txt(px + pw / 2, py + 22, `THE TRUTH OF ANTHROTZKA  ·  ${this.date}`, 8, PAPER_TEXT, 'ma');
+    rect(px + 6, py + 33, px + pw - 6, py + 34, PAPER_INK);
+    rect(px + 6, py + 37, px + pw - 6, py + 37, PAPER_INK);
+    const k = tw(n.h1) * 2 <= pw - 16 ? 2 : 1;
+    bigText(px + pw / 2, py + 44, n.h1, 12, k, PAPER_INK);
+    let yy = py + 44 + (k === 2 ? 30 : 18);
+    for (const s of wrap(n.sub, 8, pw - 20)) { txt(px + pw / 2, yy, s, 8, PAPER_TEXT, 'ma'); yy += 11; }
+    yy += 3;
+    rect(px + 6, yy, px + pw - 6, yy, PAPER_INK);
+    yy += 6;
+    for (const s of wrap(n.h2, 8, pw - 16)) { txt(px + 8, yy, s, 8, PAPER_INK); yy += 11; }
+    for (let row = 0; yy + 4 + row * 8 < py + ph - 6; row++) {
+      for (let col = 0; col < 2; col++) {
+        const x0 = px + 8 + col * 98;
+        rect(x0, yy + 4 + row * 8, x0 + 88 - ((row * 13 + col * 7) % 24), yy + 6 + row * 8, PAPER_FAINT);
+      }
+    }
   }
 }
 

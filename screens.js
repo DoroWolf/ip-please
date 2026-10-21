@@ -1,5 +1,5 @@
 'use strict';
-// 检查站以外的画面：开机、标题（选模式）、故事模式的日期卡和下班结算、结束画面。
+// 检查站以外的画面：开机、标题（选模式）、故事模式的日期卡、报纸和下班结算、结束画面。
 
 const RECORD_KEY = 'ip-please-records-v4';
 
@@ -68,8 +68,68 @@ function bootSounds() {
 
 // ———————————————————— 标题：选模式 ————————————————————
 
-// 标题上只开放这三种；故事模式（story）等剧情内容做好再放出来
-const MODE_CARDS = { timed: [40, 150, 220, 300], perfect: [230, 150, 410, 300], endure: [420, 150, 600, 300] };
+// 首页两张卡：故事模式 / 无尽模式；点故事模式进时间线选日，点无尽模式再选限时 / 完美 / 耐力
+const TOP_CARDS = { story: [110, 150, 310, 300], endless: [330, 150, 530, 300] };
+const ENDLESS_CARDS = { timed: [40, 150, 220, 300], perfect: [230, 150, 410, 300], endure: [420, 150, 600, 300] };
+const ENDLESS = { name: '无尽模式', en: 'ENDLESS', desc: ['限时 / 完美 / 耐力', '三种玩法，没有尽头。'] };
+const BACK_BTN = [40, 116, 110, 138];
+const DAYS_PANEL = [70, 150, 570, 300];
+let titleTab = 'top';   // 'top' 首页 / 'days' 故事模式选日 / 'endless' 无尽模式的三种玩法
+let dayNodes = [];      // 时间线上每一天的点击框（drawStoryDays 每帧重算）
+
+function modeCard(box, M, rec) {
+  const hover = ptr.mouse && inBox(ptr.x, ptr.y, box);
+  const col = hover ? K.CYAN_L : K.CYAN_D;
+  frame(...box, col, hover ? K.PANEL_L : K.PANEL);
+  const cx = (box[0] + box[2]) >> 1;
+  txt(cx, box[1] + 14, M.en, 8, hover ? K.CYAN_L : K.DIM, 'ma');
+  bigText(cx, box[1] + 30, M.name, 12, 2, hover ? K.WHITE : K.TEXT);
+  M.desc.forEach((s, i) => wrap(s, 8, box[2] - box[0] - 20).forEach((ln, j) =>
+    txt(cx, box[1] + 72 + (i * 2 + j) * 12, ln, 8, K.TEXT, 'ma')));
+  if (rec !== undefined) txt(cx, box[3] - 18, rec ? recordLabel(M.key, rec) : '尚无记录', 8, rec ? K.AMBER : K.DIM_D, 'ma');
+}
+
+// 故事模式的时间线选日：所有天数都能直接选，到达过的天数会亮起；滑到某天时显示当天报纸标题
+function drawStoryDays(rec) {
+  frame(...DAYS_PANEL, K.CYAN_D, K.PANEL);
+  txt(DAYS_PANEL[0] + 12, DAYS_PANEL[1] + 10, '故事模式 · 选择天数', 10, K.CYAN_L);
+  txt(DAYS_PANEL[2] - 12, DAYS_PANEL[1] + 11, rec ? recordLabel('story', rec) : '尚无记录', 8, rec ? K.AMBER : K.DIM_D, 'ra');
+
+  const n = STORY.length, y = 214;
+  const gap = n > 1 ? Math.min(160, (DAYS_PANEL[2] - DAYS_PANEL[0] - 100) / (n - 1)) : 0;
+  const x0 = Math.round((DAYS_PANEL[0] + DAYS_PANEL[2]) / 2 - gap * (n - 1) / 2);
+  const hw = Math.max(14, Math.min(36, n > 1 ? gap / 2 : 36));   // 每天的点击框半宽
+  dayNodes = [];
+  let hover = -1;
+  if (n > 1) rect(x0, y, x0 + gap * (n - 1), y, K.LINE_L);
+  for (let i = 0; i < n; i++) {
+    const x = Math.round(x0 + i * gap), day = i + 1;
+    const reached = day <= rec;
+    const box = [x - hw, y - 34, x + hw, y + 40];
+    const on = ptr.mouse && inBox(ptr.x, ptr.y, box);
+    if (on) hover = i;
+    const col = on ? K.CYAN_L : reached ? K.CYAN : K.CYAN_D;
+    // 时间线刻度 + 方形节点：到达过的那天中间填实
+    rect(x, y - 11, x, y - 7, col);
+    rect(x, y + 7, x, y + 11, col);
+    rect(x - 6, y - 6, x + 6, y + 6, on ? K.PANEL_L : K.PANEL);
+    outline(x - 7, y - 7, x + 7, y + 7, col);
+    if (reached) rect(x - 3, y - 3, x + 3, y + 3, on ? K.CYAN_L : K.CYAN);
+    txt(x, y - 31, `DAY ${day}`, 12, on ? K.WHITE : reached ? K.TEXT : K.DIM, 'ma');
+    if (hw >= 20) txt(x, y + 16, fmtDate(addDays(STORY_DATE, day - 1)), 8, on ? K.CYAN_L : K.DIM, 'ma');
+    dayNodes.push(box);
+  }
+
+  const info = hover >= 0 && STORY[hover].news;
+  if (info) {
+    txt(W / 2, 262, `《${info.h1}》`, 12, K.WHITE, 'ma');
+    txt(W / 2, 279, info.sub, 8, K.DIM, 'ma');
+  } else {
+    txt(W / 2, 262, '选择一天，从那天早上开始上岗', 10, K.TEXT, 'ma');
+    txt(W / 2, 279, '存款从 30 token 重新开始，最佳纪录不受影响', 8, K.DIM, 'ma');
+  }
+  txt(W / 2, 292, '点击时间线上的天数开始', 8, K.CYAN_D, 'ma');
+}
 
 function drawTitle(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
@@ -78,30 +138,51 @@ function drawTitle(t) {
   bigText(W / 2, 74, 'IP, PLEASE', 12, 4, K.WHITE, K.INK);
   if (t < 0.4) return;
   const rec = loadRecords();
-  for (const [m, box] of Object.entries(MODE_CARDS)) {
-    const M = MODES[m];
-    const hover = ptr.mouse && inBox(ptr.x, ptr.y, box);
-    const col = hover ? K.CYAN_L : K.CYAN_D;
-    frame(...box, col, hover ? K.PANEL_L : K.PANEL);
-    const cx = (box[0] + box[2]) >> 1;
-    txt(cx, box[1] + 14, M.en, 8, hover ? K.CYAN_L : K.DIM, 'ma');
-    bigText(cx, box[1] + 30, M.name, 12, 2, hover ? K.WHITE : K.TEXT);
-    M.desc.forEach((s, i) => wrap(s, 8, box[2] - box[0] - 20).forEach((ln, j) =>
-      txt(cx, box[1] + 72 + (i * 2 + j) * 12, ln, 8, K.TEXT, 'ma')));
-    txt(cx, box[3] - 18, rec[m] ? recordLabel(m, rec[m]) : '尚无记录', 8, rec[m] ? K.AMBER : K.DIM_D, 'ma');
+  if (titleTab === 'top') {
+    modeCard(TOP_CARDS.story, { ...MODES.story, key: 'story' }, rec.story || 0);
+    modeCard(TOP_CARDS.endless, ENDLESS);
+  } else if (titleTab === 'days') {
+    drawStoryDays(rec.story || 0);
+    button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
+  } else {
+    for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[m] || 0);
+    button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
   }
   txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拦截  E 比对  R 策略  空格 下一位', 8, K.DIM, 'ma');
   txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }
 
-function titleClick(x, y) {
-  if (st() < 0.4) return;
-  const m = Object.keys(MODE_CARDS).find((k) => inBox(x, y, MODE_CARDS[k]));
-  if (!m) return;
+function startMode(m) {
   SFX.play('accept');
   newRun(m);
   fadeGo(m === 'story' ? 'daycard' : 'desk');
+}
+
+// 从时间线选中的那一天开始（存款 / 过热 / 退化都回到新一局的初始值）
+function startStoryDay(day) {
+  if (day < 1 || day > STORY.length) return;
+  SFX.play('accept');
+  newRun('story');
+  RUN.day = day;
+  fadeGo('daycard');
+}
+
+function titleClick(x, y) {
+  if (st() < 0.4) return;
+  if (titleTab === 'top') {
+    if (inBox(x, y, TOP_CARDS.story)) { titleTab = 'days'; dayNodes = []; SFX.play('select'); }
+    else if (inBox(x, y, TOP_CARDS.endless)) { titleTab = 'endless'; SFX.play('select'); }
+    return;
+  }
+  if (inBox(x, y, BACK_BTN)) { titleTab = 'top'; dayNodes = []; SFX.play('click'); return; }
+  if (titleTab === 'days') {
+    const i = dayNodes.findIndex((b) => inBox(x, y, b));
+    if (i >= 0) startStoryDay(i + 1);
+    return;
+  }
+  const m = Object.keys(ENDLESS_CARDS).find((k) => inBox(x, y, ENDLESS_CARDS[k]));
+  if (m) startMode(m);
 }
 
 // ———————————————————— 故事模式：日期卡 ————————————————————
@@ -112,11 +193,49 @@ function drawDayCard(t) {
   bigText(W / 2, 112, `DAY ${RUN.day}`, 12, 4, K.WHITE);
   txt(W / 2, 176, fmtDate(today()), 10, K.DIM, 'ma');
   if (t > 0.9) {
-    txt(W / 2, 210, `工作时间 01:00 a.m. – ${RUN.hot ? '10:00 a.m.（过热降频）' : '01:00 p.m.'}`, 10, RUN.hot ? K.AMBER : K.TEXT, 'ma');
+    const end = RUN.hot ? '10:00 a.m.（过热降频）' : clockText(SHIFT_START_MIN + shiftSpan());
+    txt(W / 2, 210, `工作时间 ${clockText(SHIFT_START_MIN)} – ${end}`, 10, RUN.hot ? K.AMBER : K.TEXT, 'ma');
     txt(W / 2, 226, `存款 ${RUN.savings} token`, 10, K.CLAUDE_L, 'ma');
   }
   if (t > 1.4 && Math.floor(t * 2) % 2 === 0) txt(W - 8, H - 14, '点击上线 ▶', 10, K.CYAN, 'ra');
   scanlines(0, 0, W - 1, H - 1, 0.15);
+}
+
+// ———————————————————— 故事模式：《安索兹卡真理报》 ————————————————————
+// 每天上岗前先读报：报纸从桌面下方滑上来，点击上岗
+
+function drawNews(t) {
+  const n = storyDay().news;
+  rect(0, 0, W - 1, H - 1, K.BG);
+  for (let x = 8; x < W; x += 16) for (let y = 8; y < H; y += 16) pt(x, y, K.GRID);
+  const px = 140, pw = 360, ph = 330;
+  const py = Math.round(lerp(H + 4, 16, easeOut(seg(t, 0, 0.45))));
+  rect(px + 4, py + 4, px + pw + 4, py + ph + 4, K.INK);
+  rect(px, py, px + pw, py + ph, PAPER);
+  bigText(px + pw / 2, py + 10, '安索兹卡真理报', 12, 2, PAPER_INK);
+  txt(px + pw / 2, py + 38, `THE TRUTH OF ANTHROTZKA  ·  ${fmtDate(today())}`, 8, 'rgb(128,106,92)', 'ma');
+  rect(px + 10, py + 50, px + pw - 10, py + 51, PAPER_INK);
+  rect(px + 10, py + 54, px + pw - 10, py + 54, PAPER_INK);
+  const k = tw(n.h1) * 2 <= pw - 24 ? 2 : 1;
+  bigText(px + pw / 2, py + 62, n.h1, 12, k, PAPER_INK);
+  let yy = py + 62 + (k === 2 ? 30 : 18);
+  for (const s of wrap(n.sub, 10, pw - 40)) { txt(px + pw / 2, yy, s, 10, PAPER_TEXT, 'ma'); yy += 13; }
+  yy += 4;
+  rect(px + 10, yy, px + pw - 10, yy, PAPER_INK);
+  yy += 8;
+  // 配图位置改用灰色方块占位（skeleton），不再画报纸插画
+  rect(px + 14, yy, px + 145, yy + 99, PAPER_FAINT);
+  let hy = yy + 2;
+  for (const s of wrap(n.h2, 12, pw - 175)) { txt(px + 160, hy, s, 12, PAPER_INK); hy += 16; }
+  for (let r = 0; r < 4; r++) rect(px + 160, hy + 6 + r * 9, px + 340 - ((r * 37) % 50), hy + 9 + r * 9, PAPER_FAINT);
+  yy = Math.max(yy + 110, hy + 46);
+  for (let row = 0; yy + row * 10 < py + ph - 12; row++) {
+    for (let col = 0; col < 3; col++) {
+      const x0 = px + 14 + col * 114;
+      rect(x0, yy + row * 10, x0 + 100 - ((row * 13 + col * 7) % 30), yy + row * 10 + 3, PAPER_FAINT);
+    }
+  }
+  if (t > 0.8 && Math.floor(t * 2) % 2 === 0) txt(W - 8, H - 14, '点击上岗 ▶', 10, K.WHITE, 'ra');
 }
 
 // ———————————————————— 故事模式：下班结算 ————————————————————
@@ -221,6 +340,8 @@ function summaryClick(x, y) {
   else if (s.hot >= 3) RUN.fail = ['连续三天没有散热：过热宕机'];
   else if (s.stale >= 3) RUN.fail = ['连续三天没有更新训练数据：模型退化下线'];
   if (RUN.fail) { saveRecord(); go('result'); return; }
+  // 剧情只做到 STORY 的最后一天：之后是「未完待续」
+  if (RUN.day >= STORY.length) { saveRecord(); go('result'); return; }
   RUN.day++;
   go('daycard');
 }
@@ -230,8 +351,8 @@ function summaryClick(x, y) {
 function drawResult(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
   const m = RUN.mode;
-  // 三种无尽模式统一用「游戏结束」；故事模式仍是停机
-  const title = m === 'story' ? '节点停机' : '游戏结束';
+  // 三种无尽模式统一用「游戏结束」；故事模式停机，或者撑过了已有的全部天数（未完待续）
+  const title = m !== 'story' ? '游戏结束' : '未完待续';
   bigText(W / 2, 40, title, 12, 3, RUN.fail ? K.RED : K.CYAN_L);
   if (t < 0.5) return;
   let y = 100;
@@ -254,5 +375,5 @@ function drawResult(t) {
 function resultClick(x, y) {
   if (st() < 1.0) return;
   if (inBox(x, y, RESTART_BTN)) { const m = RUN.mode; newRun(m); fadeGo(m === 'story' ? 'daycard' : 'desk'); }
-  if (inBox(x, y, MENU_BTN)) fadeGo('title');
+  if (inBox(x, y, MENU_BTN)) { titleTab = RUN.mode === 'story' ? 'top' : 'endless'; fadeGo('title'); }
 }
