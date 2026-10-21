@@ -8,7 +8,6 @@ function go(name) {
   SFX.ambient(name === 'desk');
   if (name === 'title') titleMusic = SFX.play('title', 0.6);
   if (name === 'daycard') SFX.play('day_hit');
-  if (name === 'news') SFX.play('whoosh');
   if (name === 'summary') { SFX.play('sad', 0.8); initSummary(); }
   if (name === 'result') SFX.play(RUN.fail ? 'sad' : 'end', 0.8);
   if (name === 'desk') startShift();
@@ -62,8 +61,7 @@ function onKey(e) {
 function sceneClick(x, y) {
   if (scene === 'boot') { go('title'); return; }
   if (scene === 'title') { titleClick(x, y); return; }
-  if (scene === 'daycard' && st() > 0.8) { fadeGo('news'); return; }
-  if (scene === 'news' && st() > 0.8) { fadeGo('desk'); return; }
+  if (scene === 'daycard' && st() > 0.8) { fadeGo('desk'); return; }
   if (scene === 'summary') { summaryClick(x, y); return; }
   if (scene === 'result') resultClick(x, y);
 }
@@ -82,7 +80,6 @@ function render() {
   if (scene === 'boot') drawBoot();
   else if (scene === 'title') drawTitle(t);
   else if (scene === 'daycard') drawDayCard(t);
-  else if (scene === 'news') drawNews(t);
   else if (scene === 'desk') drawDesk();
   else if (scene === 'summary') drawSummary(t);
   else if (scene === 'result') drawResult(t);
