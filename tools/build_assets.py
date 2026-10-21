@@ -5,7 +5,8 @@
   python tools/build_assets.py
 
 - 字体图集：扫描根目录下所有 JS/HTML 里出现的字符，只渲染这些字（缝合像素字体 8/10/12px）
-- 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、默认剪影、少量自拍），统一套像素滤镜；Claude 徽标
+- 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、默认剪影、少量自拍），统一套像素滤镜；Claude 徽标；
+  故事模式《安索兹卡真理报》的配图
 产物是一个 JS 文件（图片以 base64 内嵌），所以 index.html 直接双击也能玩。
 """
 import base64
@@ -231,6 +232,25 @@ def title_emblem():
     return im
 
 
+def news_icon(kind):
+    """《安索兹卡真理报》配图：透明底上的墨色单色像素画（133×101），直接印在报纸上。"""
+    w, h = 132, 100
+    ink = (60, 50, 44)
+    im = Image.new("RGBA", (w + 1, h + 1), (0, 0, 0, 0))
+    d = draw(im)
+    cx, cy = w // 2, h // 2
+    if kind == "gate":   # 边境开放：栅栏 + 门楣上的徽记
+        d.rectangle([8, cy + 10, w - 8, cy + 12], fill=ink)
+        for px in range(12, w - 8, 10):
+            d.line([px, cy - 14, px, cy + 12], fill=ink)
+        d.rectangle([cx - 14, cy - 22, cx + 14, cy - 6], fill=ink)
+        spark(d, cx, cy - 14, (200, 188, 166), big=False)
+    return im
+
+
+NEWS_ICONS = ["gate"]
+
+
 # ———————————————————— 图集 ————————————————————
 
 
@@ -276,6 +296,8 @@ def main():
             pk.add(key, pixelate(fn(rng)))
             avatars.append(key)
     pk.add("title_emblem", title_emblem())
+    for k in NEWS_ICONS:
+        pk.add(f"news:{k}", news_icon(k))
     sheet, pos = pk.build()
 
     blobs, sizes = {}, {}

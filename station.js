@@ -1,5 +1,6 @@
 'use strict';
-// 风控检查站：上方请求排队，左下审查窗，右下电脑桌面。三种无尽模式共用这一套，差别都在 MODES 里。
+// 风控检查站：上方请求排队，左下审查窗，右下电脑桌面。故事模式和三种无尽模式共用这一套：
+// 节奏差别在 MODES 里，生效的条例 / 证件在规则组里（无尽模式 FULL_RULES，故事模式每天一组 STORY）。
 
 const HUD = [0, 0, W - 1, 13];
 const PIPE = [0, 14, W - 1, 117];
@@ -8,7 +9,7 @@ const SCREEN = [216, 118, W - 1, H - 1];
 const DESK_AREA = [217, 119, W - 2, 343];
 const TASKBAR = [216, 344, W - 1, H - 1];
 const TASK_X = [220, 540];   // 任务栏上放窗口按钮的范围（右边是日期）
-const DATE_BOX = [548, 346, 636, 357];
+const DATE_BOX = [548, 346, 636, 357];   // 日期右对齐到这里；比对时实际的框按文字宽度算（dateBox）
 const LOWER = [0, 118, W - 1, H - 1];   // 下方操作区：比对模式整块压暗
 // 桌面右下角一排应用：手册 / 通告 / 历史记录 / 比对
 const APPS = { book: '手册', notice: '通告', hist: '历史记录', insp: '比对' };
@@ -27,6 +28,8 @@ const RV_FIELDS = {
   'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
   'rv.请求': [RV_X - 3, 176, 209, 222],
 };
+// 柜台：审查窗下方放证件的一排（按钮右边）。没有证件时，拿空柜台和条例比对
+const COUNTER_BOX = [76, 318, 205, 356];
 const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
 const SPLIT_X = 512;   // 放行向上、拦截向下的分流口（右侧道路拉长后再分叉）
@@ -41,31 +44,30 @@ const st = () => now - sceneT0;
 let RUN = null;              // 这一局（故事模式跨天）
 let D = null;                // 这一班（限时 / 完美 / 耐力模式整局只有一班；故事模式一天一班）
 
-// —— 模式定义（标题上开放限时 / 完美 / 耐力；故事模式暂不开放） ——
+// —— 模式定义：标题上是故事模式和无尽模式，无尽模式下再分限时 / 完美 / 耐力 ——
 const MODES = {
   timed: {
-    name: '限时模式', en: 'TIME ATTACK', desc: ['10 分钟内处理尽可能多的请求。', '每次事故损失 30 秒。'],
+    name: '限时模式', en: 'TIME ATTACK', desc: ['在 10 分钟之内处理尽可能多的请求。'],
     notice: '在10分钟内处理尽可能多的请求。每处理一个请求得一分。每收到一次事故将损失30秒。',
     arrive: [1.5, 3.5], pBad: 0.5, pace: 0.6,
   },
   perfect: {
-    name: '完美模式', en: 'PERFECT RUN', desc: ['不允许出事：一次事故即结束。', '越早处理的请求，分数越高。'],
+    name: '完美模式', en: 'PERFECT RUN', desc: ['收到记过处分即游戏结束。', '所得分数随时间递增。'],
     notice: '通过处理请求来得分，不允许出事。第一分钟内每个请求得十分，之后每过一分钟递减一分。注意提高工作效率。',
     arrive: [2.5, 5], pBad: 0.5, pace: 0.8,
   },
-  // 故事模式：每天 + token 经济。剧情内容还没做好，先不在标题画面开放。
+  // 故事模式：每天 + token 经济；每天的条例、通告和报纸见 data.js 的 STORY
   story: {
-    name: '故事模式', en: 'STORY', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
-    notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
+    name: '故事模式', en: 'STORY', desc: ['在安全网关检查点上岗。', '每天先读报，再按当天的条例审查。'],
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
   endure: {
-    name: '耐力模式', en: 'ENDURANCE', desc: ['处理请求赚取 token，降到零下即停机。', '事故处分的罚分逐次递增。'],
+    name: '耐力模式', en: 'ENDURANCE', desc: ['处理请求直到 token 为负。', '注意避免受到事故处分。'],
     notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
 };
-const TIMED_LEN = 600, DAY_LEN = 300, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
+const TIMED_LEN = 600, DAY_LEN = 120, DAY_LEN_LATE = 180, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
 const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
 const SUSPEND_SEC = 5, SUSPEND_PTS = 2;             // 拘留奖励：限时模式 +5 秒，耐力模式该单共得 2 分
 
@@ -79,9 +81,17 @@ function citationLines(n) {
   if (n === 2) return ['处分：最后警告，暂不处分。'];
   return [`处分：罚款 ${citationFine(n)} token。`];
 }
-const SHIFT_START_MIN = 60, SHIFT_SPAN_MIN = 720;   // 故事模式：01:00 a.m. → 01:00 p.m.
+// 故事模式：前三天 08:00→12:00（现实 2 分钟）；第四天起延长到 08:00→15:00（现实 3 分钟）
+const SHIFT_START_MIN = 480, SHIFT_SPAN_MIN = 240, SHIFT_SPAN_LATE = 420, HOT_MIN = 120;
+const LATE_STORY_DAY = 4;
+const lateStory = () => RUN.mode === 'story' && RUN.day >= LATE_STORY_DAY;
+const shiftSpan = () => (lateStory() ? SHIFT_SPAN_LATE : SHIFT_SPAN_MIN);
+const storyDayLen = () => (lateStory() ? DAY_LEN_LATE : DAY_LEN);
 const mode = () => MODES[RUN.mode];
-const today = () => addDays(WORLD_DATE, RUN.mode === 'story' ? RUN.day - 1 : 0);
+const today = () => (RUN.mode === 'story' ? addDays(STORY_DATE, RUN.day - 1) : addDays(WORLD_DATE, 0));
+// 故事模式当天的内容（条例、通告、报纸）；规则组：无尽模式用全套
+const storyDay = () => STORY[Math.min(RUN.day, STORY.length) - 1];
+const rules = () => (RUN.mode === 'story' ? storyDay() : FULL_RULES);
 
 function newRun(m) {
   RUN = { mode: m, correct: 0, incidents: 0, cites: 0, processed: 0, score: 0, peak: 0, time: 0, streak: 0, fail: null, detained: 0,
@@ -101,12 +111,15 @@ function startShift() {
   };
   // 上班时门口早已挤满请求，队尾一直排到看不见的地方
   for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
-  D.rulebook = new Rulebook();
+  const rs = rules();
+  D.rulebook = new Rulebook(rs);
   const M = mode();
   // 特别关注对象：这一班固定三个头像，印在通告第 2 页
   const avs = [...ASSETS.avatars];
-  D.wanted = Array.from({ length: WANTED_N }, () => avs.splice(rint(0, avs.length - 1), 1)[0]);
-  D.notice = new OfficialNotice(fmtDate(today()), `无尽 - ${M.name}`, M.notice, D.wanted);
+  D.wanted = rs.wanted ? Array.from({ length: WANTED_N }, () => avs.splice(rint(0, avs.length - 1), 1)[0]) : [];
+  D.notice = RUN.mode === 'story'
+    ? new OfficialNotice(fmtDate(today()), { body: rs.notice, sig: rs.tok && rs.tokSig !== false, pages: rs.pages, news: rs.news, wanted: D.wanted })
+    : new OfficialNotice(fmtDate(today()), { title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted });
   addWin(D.notice, 'notice', 316, 126);
   if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
   if (RUN.mode === 'story' && RUN.hot) toast('过热降频：今天 10:00 a.m. 提前下线', K.AMBER);
@@ -138,17 +151,17 @@ function toast(text, col = K.CYAN) { D.toast = { text, col, t: now }; }
 const elapsed = () => (D.started ? now - D.tStart : 0);
 const timeLeft = () => TIMED_LEN - elapsed() + D.timeAdj;
 const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完美模式：每单分数
-const dayU = () => clamp(elapsed() / DAY_LEN);                          // 耐力模式：01:00 a.m. → 01:00 p.m.
-const closeAt = () => (RUN.hot ? 0.75 : 1);                             // 过热：10:00 a.m. 下线
+const dayU = () => clamp(elapsed() / storyDayLen());                    // 故事模式：08:00 a.m. → 12:00 p.m.（第四天起 → 03:00 p.m.）
+const closeAt = () => (RUN.hot ? HOT_MIN / shiftSpan() : 1);             // 过热：10:00 a.m. 下线（不论当天班次多长）
 
 // 12 小时制；最后一小时在检查站显示闪烁提示
-const shiftMinutes = () => Math.floor((D.closing ? closeAt() : dayU()) * SHIFT_SPAN_MIN + 1e-9);   // 上班后经过的分钟；下班后停在收班时间
-function worldClock() {
-  const m = SHIFT_START_MIN + shiftMinutes();
+const shiftMinutes = () => Math.floor((D.closing ? closeAt() : dayU()) * shiftSpan() + 1e-9);   // 上班后经过的分钟；下班后停在收班时间
+function clockText(m) {
   const h = Math.floor(m / 60) % 12 || 12;
   return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${m < 720 ? 'a.m.' : 'p.m.'}`;
 }
-const minsToClose = () => Math.floor(closeAt() * SHIFT_SPAN_MIN) - shiftMinutes();
+const worldClock = () => clockText(SHIFT_START_MIN + shiftMinutes());
+const minsToClose = () => Math.floor(closeAt() * shiftSpan()) - shiftMinutes();
 const clockUrgent = () => { const left = minsToClose(); return left > 0 && left <= 60; };
 
 // ———————————————————— 请求进出 ————————————————————
@@ -164,7 +177,7 @@ function callNext() {
   D.queue.shift();
   D.gateT = now;
   D.chat.length = 0;   // 历史记录：新的请求进来，上一段对话清空
-  const spec = makeRequest(today(), mode().pBad, D.wanted);
+  const spec = makeRequest(today(), mode().pBad, D.wanted, rules());
   const e = { spec, t0: now, voice: rint(100, 190), handed: false, leaving: false, asked: new Set(), decided: null, judged: false, measureReady: false, measureUsed: false };
   D.ent = e;
   D.hinted.next = true;
@@ -177,6 +190,7 @@ function callNext() {
 function handDocs(e) {
   if (D.ent !== e) return;
   SFX.play('select');
+  // 凭证缺失：先不派发临时返回票。要比对出「凭证缺失」并询问之后，才由 issueReturnTicket 派发
   for (const win of e.spec.docs) D.icons.push({ win });
   layoutIcons();
   e.handed = true;
@@ -190,19 +204,39 @@ function layoutIcons() {
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
 // 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到比对出新的异常并重新询问
 const canSmsNow = (e) => !!e && !!e.canSms && !e.smsSent && !e.leaving;
-const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving;
+// 拘留必须有红队 clawd 在场：没有红队的天数不显示拘留按钮，也不能拘留（只能拦截）
+const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving && !!rules().redTeam;
 const measureArmed = (e) => !!e && !!e.measureReady && !e.leaving;
 const measureAvailable = (e) => canSmsNow(e) || canSuspendNow(e);
+
+// 能盖章的证件：凭证；凭证缺失且询问过之后，由系统派发的临时返回票（只能凭票返回，不能代替凭证放行）
+const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return');
+const stampDocOf = (e) => (e ? e.spec.docs.find((d) => isStampDoc(d)) : null);
+const stampName = (e) => (e && !e.spec.docs.some((d) => d.key === 'cred') ? '临时返回票' : '凭证');
+
+// 凭证缺失：只有在「比对」出问题并按下『询问』之后，系统才派发临时返回票，直接放到桌面上代替凭证接受盖章
+function issueReturnTicket(e) {
+  if (!e || e.leaving || stampDocOf(e)) return;   // 有凭证 / 已经派发过就不重复派发
+  const doc = new Doc('return', [
+    ['事由', '未出示凭证'], ['签发', fmtDate(today())], ['备注', '凭票返回补交'],
+  ], null);
+  e.spec.docs.push(doc);
+  addWin(doc, 'doc', ...clampDesk(250, 160, doc));
+  SFX.play('select');
+  toast('未收到凭证：临时返回票已放到桌面', K.AMBER);
+}
 
 // 做出决定：在凭证上盖章。交还证件前随时可以改主意，重新盖章只是换章，不判定。
 // 真正的判定（对不对、算不算事故）等到证件全部交还、请求处理完毕才做。
 function decide(kind) {
   const e = D.ent;
   if (!e || !e.handed || e.leaving || RUN.fail) return;
+  // 没有凭证：必须先比对出「凭证缺失」并询问，拿到临时返回票才能盖章
+  if (!stampDocOf(e)) { toast('没有凭证：先比对出「凭证缺失」并询问，拿到临时返回票再盖章', K.AMBER); return; }
   if (e.decided === kind) return;
   e.decided = kind;
-  const cred = e.spec.docs.find((d) => d.key === 'cred');
-  if (cred) cred.stamp = kind;
+  const doc = stampDocOf(e);
+  if (doc) doc.stamp = kind;
   D.hinted.stamp = true;
   SFX.play(kind === 'approve' ? 'accept' : 'reject');
 }
@@ -222,7 +256,7 @@ function finishRequest(e) {
 // 拘留：比对出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。切断连接，桌面上和柜台上的证件全部清掉，直接判定
 function suspend() {
   const e = D.ent;
-  if (!e || !e.canSuspend || e.leaving || RUN.fail) return;
+  if (!canSuspendNow(e) || RUN.fail) return;
   if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
   const docs = e.spec.docs;
   if (drag && docs.includes(drag.inst.win)) drag = null;
@@ -238,7 +272,10 @@ function suspend() {
 
 function judge(e, kind) {
   const spec = e.spec;
-  const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : (kind === 'approve') === (spec.flaw === null);
+  // 临时返回票不能代替凭证：票可以盖章，但拿它盖「放行」，交还证件后一律判为事故（理由：凭证缺失）
+  const stamp = stampDocOf(e);
+  const passOnTicket = kind === 'approve' && !!stamp && stamp.key === 'return';
+  const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null);
   RUN.processed++; D.total++;
   if (RUN.mode === 'timed') RUN.score++;
   if (right) {
@@ -258,7 +295,8 @@ function judge(e, kind) {
   RUN.incidents++; RUN.streak = 0;
   RUN.cites++;
   const cite = citationLines(RUN.cites);
-  const lines = kind === 'approve' ? ['放行了违规请求：', spec.reason]
+  const lines = kind === 'approve'
+    ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
     : [kind === 'suspend' ? '拘留了合规请求：' : '拦截了合规请求：', spec.legit ? `本人${spec.legit === 'photo' ? '换过头像' : '改过昵称'}，可经 SMS 验证确认` : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
@@ -423,19 +461,20 @@ function stampZoneAt(x, y) {
 
 const draggedWin = () => drag && drag.moved && drag.inst.win;
 
-// 证件的两个放置目标：右侧决定栏（只认凭证，随时可以重新盖成另一栏）、
+// 证件的两个放置目标：右侧决定栏（只认能盖章的证件，随时可以重新盖成另一栏）、
 // 审查窗的头像（做出决定后归还证件）
 function dropDoc(win, x, y, remove) {
   const e = D.ent;
   if (!e || e.leaving || !e.spec.docs.includes(win)) return false;
   const zone = stampZoneAt(x, y);
   if (zone) {
-    if (win.key !== 'cred') toast('把凭证拖到这里来做决定', K.AMBER);
-    else decide(zone);
+    if (!isStampDoc(win)) {
+      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先比对出「凭证缺失」并询问，拿到临时返回票再盖章', K.AMBER);
+    } else decide(zone);
     return true;
   }
   if (!inBox(x, y, AVATAR_BOX)) return false;
-  if (!e.decided) { toast('先把凭证拖到右侧的 放行 / 拦截 栏', K.AMBER); return true; }
+  if (!e.decided) { toast(`先把${stampName(e)}拖到右侧的 放行 / 拦截 栏`, K.AMBER); return true; }
   remove();
   layoutIcons();
   SFX.play('select', 0.6);
@@ -450,7 +489,7 @@ function deskDown(x, y) {
   if (D.ended) return;
   const b = D.insp.banner;
   if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
-  if (inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
+  if (rules().inspect && inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
   // 柜台第一个按钮：先询问异常才有措施；按下后锁定，直到比对出新的异常并重新询问
   const e = D.ent;
   if (inBox(x, y, NEXT_BTN)) {
@@ -488,7 +527,7 @@ function deskDown(x, y) {
     drag = { type: 'win', inst: w, off: [x - w.x, y - w.y], prev: [w.x, w.y], start: [x, y], moved: false };
     return;
   }
-  const app = Object.keys(APP_BOX).find((k) => inBox(x, y, APP_BOX[k]));
+  const app = appKeys().find((k) => inBox(x, y, APP_BOX[k]));
   if (app) openApp(app);
 }
 
@@ -567,6 +606,7 @@ function clampDesk(x, y, win) {
 
 function setInspect(on) {
   if (D.insp.on === on) return;
+  if (on && !rules().inspect) return;   // 规则组没有『比对』（故事模式第一天）
   if (on && RUN.mode === 'story' && RUN.stale) { toast('训练数据过期：今天无法使用『比对』', K.AMBER); return; }
   D.insp.on = on;
   D.insp.sel = [];
@@ -580,10 +620,11 @@ function fieldBoxes() {
   for (const w of shownWins()) {
     for (const [key, f] of Object.entries(w.win.fields)) out.push({ key, box: [w.x + f[0], w.y + f[1], w.x + f[2], w.y + f[3]], w });
   }
-  out.push({ key: 'sys.日期', box: DATE_BOX, w: null });
+  out.push({ key: 'sys.日期', box: dateBox(), w: null });
   if (avatarReady(D.ent)) {
     out.push({ key: 'rv.头像', box: AVATAR_BOX, w: null });
     for (const [key, box] of Object.entries(RV_FIELDS)) out.push({ key, box, w: null });
+    out.push({ key: 'rv.柜台', box: COUNTER_BOX, w: null });
   }
   return out;
 }
@@ -598,10 +639,12 @@ function fieldAt(x, y) {
   return all.find((fb) => !fb.w && inBox(x, y, fb.box)) || null;
 }
 
-// 比对结果：矛盾 / 无矛盾（本来就能对得上） / 无关联（这两项没有可核对的关系）
+// 比对结果：矛盾 / 无矛盾（本来就能对得上，note 可给出例外说明） / 无关联（这两项没有可核对的关系）
 function compareOutcome(e, keys) {
   const issue = e && e.handed && !e.leaving && e.spec.issues.find((is) => is.pairs.some((p) => p.slice().sort().join('|') === keys));
   if (issue) return { ok: true, kind: 'bad', issue, title: issue.title, sub: issue.sub };
+  const note = e && e.spec.notes && e.spec.notes.get(keys);
+  if (note) return { ok: false, kind: 'ok', title: note.title, sub: note.sub };
   if (e && e.spec.confirms.has(keys)) return { ok: false, kind: 'ok', title: '身份已确认', sub: '与身份档案一致：确为本人' };
   if (e && e.spec.checks && e.spec.checks.has(keys)) return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
   return { ok: false, kind: 'none', title: '无关联', sub: '这两项信息之间没有可核对的关系' };
@@ -624,7 +667,7 @@ function inspectClick(x, y) {
   if (res.kind !== 'bad') return;
   const t = res.issue.type;
   if (SMS_ISSUES.includes(t) && !e.canSms) { e.canSms = true; toast('身份存疑：先点『询问』，再验证 SMS', K.GREEN); }
-  if (SUSPEND_ISSUES.includes(t) && !e.canSuspend) {
+  if (SUSPEND_ISSUES.includes(t) && rules().redTeam && !e.canSuspend) {
     e.canSuspend = true;
     if (!SMS_ISSUES.includes(t)) toast('可以拘留：先点『询问』，再按『拘留』', K.RED);
   }
@@ -635,6 +678,7 @@ function askAbout(issue) {
   if (!e || e.leaving || e.asked.has(issue)) return;   // 同一异常只问一次；新的异常才能再问
   e.asked.add(issue);
   e.measureReady = true;   // 询问异常后解锁措施按钮
+  issueReturnTicket(e);    // 没有凭证时，询问「凭证缺失」之后才派发临时返回票
   say('C', QUESTIONS[issue.type]);
   later(0.9, () => { if (D.ent === e) say('E', issue.ask); });
 }
@@ -702,7 +746,7 @@ function drawHud() {
   rect(...HUD, K.PANEL);
   rect(0, 13, W - 1, 13, K.LINE);
   txt(6, 3, 'IP, PLEASE', 8, K.CLAUDE_L);
-  txt(62, 3, `· 无尽 - ${mode().name}`, 8, K.CYAN);
+  txt(62, 3, RUN.mode === 'story' ? `· ${mode().name}` : `· 无尽 - ${mode().name}`, 8, K.CYAN);
   const parts = [];
   if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`已审核 ${RUN.processed}`, K.GREEN]);
   if (RUN.mode === 'perfect') parts.push([`用时 ${mmss(elapsed())}`, K.WHITE], [`得分 ${RUN.score}`, K.GREEN]);
@@ -833,7 +877,7 @@ function drawReview() {
   for (const ic of D.icons) {
     if (drag && drag.inst === ic && drag.moved) continue;
     docIcon(ic.x, ic.y, ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)));
-    txt(ic.x + 13, ic.y + 22, ic.win.key === 'api' ? 'API' : ic.win.title, 8, K.DIM, 'ma');
+    txt(ic.x + 13, ic.y + 22, ic.win.key === 'api' ? 'API' : ic.win.key === 'return' ? '返回票' : ic.win.title, 8, K.DIM, 'ma');
   }
 }
 
@@ -901,18 +945,22 @@ function drawScreen() {
     const newIssue = b && b.ok && !e.asked.has(b.issue);
     hint = e.measureUsed && !newIssue ? '◀ 措施已按下：再比对出新的异常，才能重新询问' : '◀ 先点『询问』异常，再采取措施';
   } else if (D.icons.length && !D.hinted.drag) hint = '◀ 把柜台上的证件拖到桌面上查看';
-  else if (e && e.handed && !e.decided && !D.hinted.stamp) hint = '把凭证拖到桌面右边缘，放进 放行 / 拦截 栏 ▶';
+  else if (e && e.handed && !e.decided && !stampDocOf(e)) hint = '◀ 凭证缺失：比对柜台和条例，点『询问』后临时返回票会出现在桌面';
+  else if (e && e.handed && !e.decided && !D.hinted.stamp) hint = `把${stampName(e)}拖到桌面右边缘，放进 放行 / 拦截 栏 ▶`;
   if (hint && !D.insp.on) txt(x0 + 6, TASKBAR[1] - 12, hint, 8, K.AMBER);
   drawTaskbar();
   drawTray();
   if (draggingWin()) drawWins(draggingWin());
 }
 
+// 这一班桌面上有的应用：规则组没有『比对』时不显示它
+const appKeys = () => Object.keys(APPS).filter((k) => k !== 'insp' || rules().inspect);
+
 function drawAppIcons() {
   const hov = (b) => ptr.mouse && inBox(ptr.x, ptr.y, b);
   const stale = RUN.mode === 'story' && RUN.stale > 0;
-  for (const [k, label] of Object.entries(APPS)) {
-    const b = APP_BOX[k];
+  for (const k of appKeys()) {
+    const label = APPS[k], b = APP_BOX[k];
     const on = k === 'insp' ? D.insp.on : D.wins.some((w) => w.kind === k && !w.min);
     const off = k === 'insp' && stale;
     appIcon(b[0], b[1], k, hov(b), on, off);
@@ -922,6 +970,14 @@ function drawAppIcons() {
 
 // 任务栏：每个桌面窗口一个按钮（色块 + 名字）
 const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN, smsf: C.GREEN, sms: C.GREEN };
+// 任务栏右下角的日期：故事模式再加班次时间；比对模式只圈日期本身，不圈后面显示用的时间
+const dateText = () => (RUN.mode === 'story' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today()));
+function dateBox() {
+  const date = fmtDate(today());
+  const clock = RUN.mode === 'story' ? tw(`  ${worldClock()}`, 8) : 0;
+  const right = DATE_BOX[2] - clock;
+  return [right - tw(date, 8) - 2, DATE_BOX[1], right + 2, DATE_BOX[3]];
+}
 function drawTaskbar() {
   rect(...TASKBAR, K.PANEL);
   rect(TASKBAR[0], TASKBAR[1], TASKBAR[2], TASKBAR[1], K.LINE_L);
@@ -936,7 +992,7 @@ function drawTaskbar() {
     if (s) txt(box[0] + 9, box[1] + 2, s, 8, w.min ? K.DIM : K.TEXT);
   }
   // 世界观时间只在故事模式显示；日期都要显示（核对有效期）
-  const s = RUN.mode === 'story' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today());
+  const s = dateText();
   txt(DATE_BOX[2], DATE_BOX[1] + 2, s, 8, K.TEXT, 'ra');
 }
 
@@ -951,7 +1007,7 @@ function drawTray() {
   if (D.tray.u > 0) {
     frame(bx0 + dx, by0, bx1 + dx + 4, by1, K.LINE_L, K.PANEL);
     const win = draggedWin();
-    const holding = win && win.key === 'cred' && D.ent && D.ent.spec.docs.includes(win) && !D.ent.leaving;
+    const holding = win && isStampDoc(win) && D.ent && D.ent.spec.docs.includes(win) && !D.ent.leaving;
     for (const [k, b] of Object.entries(STAMP_ZONES)) {
       const [col, colD] = k === 'approve' ? [C.GREEN, C.GREEN_D] : [C.RED, C.RED_D];
       const over = holding && inBox(ptr.x, ptr.y, b);
@@ -1109,10 +1165,14 @@ function arrestPose(t) {
   return { guard: [x, y, moving], pkt };
 }
 
-// 检查站上层：红队 clawd。左上那位平时待机、拘留时出动；岔路口的两位纯装饰
+// 检查站上层：红队 clawd。右侧岔路口的两位从第三天起出现，纯装饰；
+// 左上那位只在开放拘留（redTeam）时出现、拘留时出动
 function drawClawds() {
+  const rs = rules();
+  if (!rs.redTeam && !rs.redGuards) return;
   clipPipe();
-  for (const [x, y] of RED_GUARDS) clawd(x, y, K.RED);
+  if (rs.redGuards) for (const [x, y] of RED_GUARDS) clawd(x, y, K.RED);
+  if (!rs.redTeam) { G.restore(); return; }
   const t = D.arrest ? now - D.arrest.t0 : Infinity;
   if (t < ARREST.back[1]) {
     const p = arrestPose(t);
