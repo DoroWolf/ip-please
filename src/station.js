@@ -20,7 +20,7 @@ const APPS = { book: '手册', notice: '通告', hist: '历史记录', insp: '�
 const APP_BOX = {};
 Object.keys(APPS).forEach((k, i) => { const x = 500 + i * 34; APP_BOX[k] = [x, 310, x + 25, 329]; });
 const INSPECT_ICON = APP_BOX.insp;
-// 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拦截 栏即做出决定
+// 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拒绝 栏即做出决定
 const TRAY_W = 72, TRAY_BOX = [W - TRAY_W, 154, W - 1, 270], TRAY_HOT = [W - 10, 119, W - 1, 343];
 const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W - 6, 264] };
 const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 拘留共用
@@ -36,7 +36,7 @@ const RV_FIELDS = {
 const COUNTER_BOX = [76, 318, 205, 356];
 const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
-const SPLIT_X = 512;   // 放行向上、拦截向下的分流口（右侧道路拉长后再分叉）
+const SPLIT_X = 512;   // 放行向上、拒绝向下的分流口（右侧道路拉长后再分叉）
 const BANNER_BOX = [222, 122, 634, 150], ASK_BTN = [586, 127, 628, 145];
 
 // —— 全局状态（各脚本共用） ——
@@ -125,7 +125,7 @@ function startShift() {
   const avs = [...ASSETS.avatars];
   D.wanted = rs.wanted ? Array.from({ length: WANTED_N }, () => avs.splice(rint(0, avs.length - 1), 1)[0]) : [];
   D.notice = RUN.mode === 'story'
-    ? new OfficialNotice(fmtDate(today()), { body: rs.notice, sig: rs.tok && rs.tokSig !== false, pages: rs.pages, news: rs.news, wanted: D.wanted })
+    ? new OfficialNotice(fmtDate(today()), { body: rs.notice, sig: !!rs.sig, pages: rs.pages, news: rs.news, wanted: D.wanted })
     : new OfficialNotice(fmtDate(today()), { title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted });
   addWin(D.notice, 'notice', 316, 126);
   if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
@@ -195,7 +195,7 @@ function callNext() {
 function handDocs(e) {
   if (D.ent !== e) return;
   SFX.play('select');
-  // 凭证缺失：先不派发临时返回票。要比对出「凭证缺失」并询问之后，才由 issueReturnTicket 派发
+  // 凭证缺失：先不派发临时返回页。要比对出「凭证缺失」并询问之后，才由 issueReturnTicket 派发
   for (const win of e.spec.docs) D.icons.push({ win });
   layoutIcons();
   e.handed = true;
@@ -209,26 +209,25 @@ function layoutIcons() {
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
 // 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到比对出新的异常并重新询问
 const canSmsNow = (e) => !!e && !!e.canSms && !e.smsSent && !e.leaving;
-// 拘留必须有红队 clawd 在场：没有红队的天数不显示拘留按钮，也不能拘留（只能拦截）
+// 拘留必须有红队 clawd 在场：没有红队的天数不显示拘留按钮，也不能拘留（只能拒绝）
 const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving && !!rules().redTeam;
 const measureArmed = (e) => !!e && !!e.measureReady && !e.leaving;
 const measureAvailable = (e) => canSmsNow(e) || canSuspendNow(e);
 
-// 能盖章的证件：凭证；凭证缺失且询问过之后，由系统派发的临时返回票（只能凭票返回，不能代替凭证放行）
+// 能盖章的证件：凭证；凭证缺失且询问过之后，由系统派发的临时返回页（只能凭票返回，不能代替凭证放行）
 const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return');
 const stampDocOf = (e) => (e ? e.spec.docs.find((d) => isStampDoc(d)) : null);
-const stampName = (e) => (e && !e.spec.docs.some((d) => d.key === 'cred') ? '临时返回票' : '凭证');
+const stampName = (e) => (e && !e.spec.docs.some((d) => d.key === 'cred') ? '临时返回页' : '凭证');
 
-// 凭证缺失：只有在「比对」出问题并按下『询问』之后，系统才派发临时返回票，直接放到桌面上代替凭证接受盖章
+// 凭证缺失：只有在「比对」出问题并按下『询问』之后，系统才派发临时返回页，直接放到桌面上代替凭证接受盖章
 function issueReturnTicket(e) {
   if (!e || e.leaving || stampDocOf(e)) return;   // 有凭证 / 已经派发过就不重复派发
-  const doc = new Doc('return', [
-    ['事由', '未出示凭证'], ['签发', fmtDate(today())], ['备注', '凭票返回补交'],
-  ], null);
+  // 版面只印一行：这张票只用于拒绝请求
+  const doc = new Doc('return', [['', '仅用于拒绝请求']], null);
   e.spec.docs.push(doc);
   addWin(doc, 'doc', ...clampDesk(250, 160, doc));
   SFX.play('select');
-  toast('未收到凭证：临时返回票已放到桌面', K.AMBER);
+  toast('未收到凭证：临时返回页已放到桌面', K.AMBER);
 }
 
 // 做出决定：在凭证上盖章。交还证件前随时可以改主意，重新盖章只是换章，不判定。
@@ -236,8 +235,8 @@ function issueReturnTicket(e) {
 function decide(kind) {
   const e = D.ent;
   if (!e || !e.handed || e.leaving || RUN.fail) return;
-  // 没有凭证：必须先比对出「凭证缺失」并询问，拿到临时返回票才能盖章
-  if (!stampDocOf(e)) { toast('没有凭证：先比对出「凭证缺失」并询问，拿到临时返回票再盖章', K.AMBER); return; }
+  // 没有凭证：必须先比对出「凭证缺失」并询问，拿到临时返回页才能盖章
+  if (!stampDocOf(e)) { toast('没有凭证：先比对出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER); return; }
   if (e.decided === kind) return;
   e.decided = kind;
   const doc = stampDocOf(e);
@@ -277,7 +276,7 @@ function suspend() {
 
 function judge(e, kind) {
   const spec = e.spec;
-  // 临时返回票不能代替凭证：票可以盖章，但拿它盖「放行」，交还证件后一律判为事故（理由：凭证缺失）
+  // 临时返回页不能代替凭证：票可以盖章，但拿它盖「放行」，交还证件后一律判为事故（理由：凭证缺失）
   const stamp = stampDocOf(e);
   const passOnTicket = kind === 'approve' && !!stamp && stamp.key === 'return';
   const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null);
@@ -302,7 +301,7 @@ function judge(e, kind) {
   const cite = citationLines(RUN.cites);
   const lines = kind === 'approve'
     ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
-    : [kind === 'suspend' ? '拘留了合规请求：' : '拦截了合规请求：', spec.legit ? `本人${spec.legit === 'photo' ? '换过头像' : '改过昵称'}，可经 SMS 验证确认` : '证件齐全，信息一致'];
+    : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? `本人${spec.legit === 'photo' ? '换过头像' : '改过昵称'}，可经 SMS 验证确认` : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
     notice('处分通知', lines.concat(cite));

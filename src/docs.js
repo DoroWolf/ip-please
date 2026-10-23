@@ -4,7 +4,7 @@
 
 const TITLE_H = 12;
 const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN' };
-const SIGNER_COL = { cred: C.CYAN, tok: C.AMBER, api: C.GREEN };
+const SIGNER_COL = { cred: C.AMBER, api: C.GREEN };
 // 标题栏右端的按钮（窗口内相对坐标）：应用（手册 / 通告 / 历史记录）有关闭钮，证件和通知只能最小化
 const CLOSE_BOX = (win) => [win.w - 12, 1, win.w - 2, TITLE_H - 2];
 const MIN_BOX = (win) => (win.closable ? [win.w - 24, 1, win.w - 14, TITLE_H - 2] : CLOSE_BOX(win));
@@ -26,19 +26,20 @@ function drawStamp(x, y, kind) {
   const [col, colD] = kind === 'approve' ? [C.GREEN, C.GREEN_D] : [C.RED, C.RED_D];
   frame(x, y, x + 43, y + 19, rgb(col), rgba(colD, 0.7));
   outline(x + 2, y + 2, x + 41, y + 17, rgba(col, 0.6));
-  txt(x + 22, y + 4, kind === 'approve' ? '放行' : '拦截', 10, rgb(col), 'ma');
+  txt(x + 22, y + 4, kind === 'approve' ? '放行' : '拒绝', 10, rgb(col), 'ma');
 }
 
-// 数字签名：图案 + 签发机构 + 指纹（证件上和手册里画法一样，方便对照）
+// 数字签名：图案 + 签发机构 + 签名（证件上和手册里画法一样，方便对照）
 function drawSeal(x, y, key, sig) {
   const col = rgb(SIGNER_COL[key]);
   frame(x, y, x + 19, y + 19, col, rgba(SIGNER_COL[key], 0.12));
   pattern(SEAL_GLYPHS[sig.glyph], x + 3, y + 3, { X: col }, 2);
   txt(x + 25, y + 1, sig.issuer, 8, K.TEXT);
-  txt(x + 25, y + 11, `指纹 ${sig.print}`, 8, K.DIM);
+  txt(x + 25, y + 11, `签名 ${sig.print}`, 8, K.DIM);
 }
 
 // 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
+// label 为空的行不登记比对栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
@@ -48,7 +49,10 @@ class Doc {
     this.h = this.sealY + 24;
     this.fields = {};
     if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
-    rows.forEach(([k], i) => { this.fields[`${key}.${k}`] = [this.vx, TITLE_H + 2 + 12 * i, this.w - 3, TITLE_H + 13 + 12 * i]; });
+    rows.forEach(([k], i) => {
+      if (!k) return;   // 没有标签的行只是版面文字（临时返回页），不参与比对
+      this.fields[`${key}.${k}`] = [this.vx, TITLE_H + 2 + 12 * i, this.w - 3, TITLE_H + 13 + 12 * i];
+    });
     if (sig) this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
   }
 
@@ -61,6 +65,7 @@ class Doc {
     }
     this.rows.forEach(([k, v], i) => {
       const yy = y + TITLE_H + 4 + i * 12;
+      if (!k) { txt(x + w / 2, yy, v, 10, K.TEXT, 'ma'); return; }   // 无标签：整行居中
       txt(x + vx + 2, yy, k, 8, K.DIM);
       txt(x + vx + 34, yy - 1, v, tw(v, 10) > w - vx - 40 ? 8 : 10, K.TEXT);
     });
@@ -105,7 +110,10 @@ class Rulebook {
     for (const r of rs.rules) {
       if (r.hidden) continue;
       const y0 = y;
-      rules.rows.push({ s: r.head, y, col: K.CYAN });
+      // 令牌只印语言时（例如目前的无尽模式），条例也只提语言；等令牌重新印时区再写回「语言和时区」
+      const headText = r.key === 'locale' && !(rs.tokRows || ['语言', '时区']).includes('时区')
+        ? '语言须与地区一致' : r.head;
+      rules.rows.push({ s: headText, y, col: K.CYAN });
       y += 12;
       rules.fields['rule.' + r.key] = [3, y0 - 2, this.w - 4, y - 2];
       y += 3;
@@ -114,10 +122,10 @@ class Rulebook {
 
     y = head(regions, '二、支持地区');
     const y0 = y;
-    // 只有令牌上真的印了语言 / 时区，支持地区页才列出这两栏（故事模式第四天起的窄版令牌没有）
-    const tokCols = rs.tok && (!rs.tokRows || rs.tokRows.includes('语言'));
-    const cols = tokCols ? [['地区', 14], ['语言', 84], ['时区', 140]] : [['地区', 14]];
-    for (const [s, x] of cols) regions.rows.push({ s, y, col: K.DIM, x });
+    // 支持地区页只列出令牌上真的印了的对照栏位（目前是语言；时区留给之后的规则组）
+    const tokCols = rs.tok ? (rs.tokRows || ['语言', '时区']).filter((k) => k === '语言' || k === '时区') : [];
+    const COL_X = { 地区: 14, 语言: 84, 时区: 140 };
+    for (const s of ['地区', ...tokCols]) regions.rows.push({ s, y, col: K.DIM, x: COL_X[s] });
     y += 13;
     for (const [continent, list] of rs.continents) {
       regions.rows.push({ s: continent, y, col: K.CYAN });
@@ -125,7 +133,8 @@ class Rulebook {
       for (const r of list) {
         const [lang, tz] = REGION_LOCALE[r];
         regions.rows.push({ s: r, y, col: K.TEXT, x: 14 });
-        if (tokCols) regions.rows.push({ s: lang, y, col: K.TEXT, x: 84 }, { s: tz, y, col: K.TEXT, x: 140 });
+        if (tokCols.includes('语言')) regions.rows.push({ s: lang, y, col: K.TEXT, x: 84 });
+        if (tokCols.includes('时区')) regions.rows.push({ s: tz, y, col: K.TEXT, x: 140 });
         y += 10;
       }
       y += 3;
@@ -135,7 +144,8 @@ class Rulebook {
     h = Math.max(h, y + 2);
 
     y = head(seals, '三、签名详情');
-    for (const key of ['cred', 'tok', 'api']) {
+    // 只有凭证和 API 授权带签名；令牌没有签名，所以不列
+    for (const key of ['cred', 'api']) {
       seals.rows.push({ s: DOC_NAMES[key], y, col: K.CYAN }, { seal: key, y: y + 10 });
       seals.fields['book.' + key] = [3, y - 2, this.w - 4, y + 31];
       y += 36;
@@ -198,7 +208,7 @@ class Rulebook {
   }
 }
 
-// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文（sig：底部印令牌签名指纹）；
+// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文（sig：底部印凭证签名）；
 // 之后依次是附页 pages（{head, body, sample}）、特别关注对象的头像（wanted 非空时）、当天的报纸（news）
 const PAPER = 'rgb(224,214,192)', PAPER_INK = 'rgb(40,34,30)', PAPER_FAINT = 'rgb(176,164,144)', PAPER_TEXT = 'rgb(74,56,48)';
 class OfficialNotice {
@@ -223,11 +233,11 @@ class OfficialNotice {
       ['翻阅规则手册查看生效的策略。', K.CYAN], null, motto], TITLE_H + 7);
     const f0 = {};
     if (sig) {
-      // 底部：安全部会话中心（令牌签发机构）的有效签名指纹
+      // 底部：安全部会话中心（凭证签发机构）的有效签名
       y += 4;
-      f0['notice.tok'] = [3, y - 2, this.w - 4, y + 20];
-      lines0.push({ s: `${SIGNERS.tok.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
-        { s: SIGNERS.tok.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
+      f0['notice.cred'] = [3, y - 2, this.w - 4, y + 20];
+      lines0.push({ s: `${SIGNERS.cred.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
+        { s: SIGNERS.cred.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
       y += 15;
     }
     this.pages.push({ lines: lines0, fields: f0, h: y + 11 });

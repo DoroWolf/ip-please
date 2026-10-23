@@ -12,10 +12,10 @@
 //   issues                 比对模式里能点出来的矛盾 {pairs, title, sub, ask}
 //   notes                  没有矛盾、但需要说明的比对结果（例如美国请求免券、外国请求已持券）
 //   checks                 这一单本来就该对得上的栏位组合（用来区分“无矛盾”和“无关联”）
-// 栏位 key：证件 'cred.IP' / 'tok.语言' / 'tok.时区' / 'tok.签发' / 'tok.有效期' / 'api.签名'，
+// 栏位 key：证件 'cred.IP' / 'tok.运营商' / 'tok.语言' / 'tok.时区' / 'tok.签发' / 'tok.有效期' / 'cred.签名' / 'api.签名'，
 //          手册 'rule.region' / 'rule.locale' / 'book.cred'，
 //          审查窗 'rv.头像' / 'rv.请求'（请求摘要）/ 'rv.柜台'（柜台上的证件），任务栏 'sys.日期'，
-//          历史记录 'hist.请求'（当前这段对话里的请求内容），通告 'notice.tok'（令牌签名指纹）/ 'notice.wanted0'（特别关注对象），
+//          历史记录 'hist.请求'（当前这段对话里的请求内容），通告 'notice.cred'（凭证签名）/ 'notice.wanted0'（特别关注对象），
 //          验证 SMS 'smsf.手机'（对方填的号码）/ 'sms.昵称' 'sms.手机' 'sms.曾用名'（身份档案）
 
 const WORLD_DATE = new Date(2078, 0, 1);
@@ -28,7 +28,7 @@ const CONTINENTS = [['北美洲', ['美国']], ['欧洲', ['英国', '德国']],
 
 // 凭证的套餐档位
 const PLANS = ['free', 'pro', 'max'];
-// 凭证地区对应的语言代码 / 时区（令牌上显示）
+// 凭证地区对应的语言代码 / 时区（令牌印语言；时区留给之后的规则组）
 const REGION_LOCALE = {
   '美国': ['en-US', 'UTC-05:00'],
   '英国': ['en-GB', 'UTC+00:00'],
@@ -42,25 +42,23 @@ const REGION_LOCALE = {
   '朝鲜': ['ko-KP', 'UTC+09:00'],
 };
 
-// —— 数字签名：每种证件只认一个签发机构、一个指纹、一种图案 ——
+// —— 数字签名：签名跟着签发机构走 ——
+// 凭证原本由安索兹卡身份局签发，现在改用安全部会话中心（原令牌）的签名；令牌没有签名；API 授权仍由安全部接口管理处签发
 const SEAL_GLYPHS = {
-  cred: ['...X...', '..XXX..', '.XX.XX.', 'XX...XX', '.XX.XX.', '..XXX..', '...X...'],
-  tok: ['XXXXXXX', '.X...X.', '..X.X..', '...X...', '..X.X..', '.X...X.', 'XXXXXXX'],
+  cred: ['XXXXXXX', '.X...X.', '..X.X..', '...X...', '..X.X..', '.X...X.', 'XXXXXXX'],
   api: ['XX...XX', 'X.....X', '..XXX..', '..X.X..', '..XXX..', 'X.....X', 'XX...XX'],
   // 伪造的图案：乍一看差不多
-  cred_f: ['...X...', '..X.X..', '.X...X.', 'X.....X', '.X...X.', '..X.X..', '...X...'],
-  tok_f: ['XXXXXXX', '.X...X.', '..XXX..', '...X...', '..XXX..', '.X...X.', 'XXXXXXX'],
+  cred_f: ['XXXXXXX', '.X...X.', '..XXX..', '...X...', '..XXX..', '.X...X.', 'XXXXXXX'],
   api_f: ['XX...XX', 'X.....X', '..XXX..', '..XXX..', '..XXX..', 'X.....X', 'XX...XX'],
 };
 const SIGNERS = {
-  cred: { issuer: '安索兹卡身份局', print: '4F2A-91C0', fakeIssuer: '安索兹卡身份所' },
-  tok: { issuer: '安全部会话中心', print: '7D13-0BE6', fakeIssuer: '安全部会话中台' },
+  cred: { issuer: '安全部会话中心', print: '7D13-0BE6', fakeIssuer: '安全部会话中台' },
   api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
 };
-const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '请求券', return: '临时返回票' };
+const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '请求券', return: '临时返回页' };
 // 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、身份矛盾（头像 / IP / 昵称）、
-// 证件过期、特别关注对象，以及令牌的语言 / 时区与凭证地区不符
-const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale'];
+// 证件过期、特别关注对象，以及令牌的语言 / 运营商与凭证地区不符
+const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale', 'isp'];
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
 // 比对出这些问题后拘留按钮亮起（issue.type）：除了上面的问题，还有 SMS 验证里查出的矛盾
 const SUSPEND_ISSUES = SUSPEND_FLAWS.concat(['phone', 'oldname']);
@@ -71,7 +69,7 @@ const PHONE_CC = { '美国': '+1', '英国': '+44', '日本': '+81', '德国': '
 
 const genuine = (key) => ({ issuer: SIGNERS[key].issuer, print: SIGNERS[key].print, glyph: key });
 
-// 伪造签名：图案、机构、指纹三者之一不对；返回 [签名, 说明, 哪一项不对]
+// 伪造签名：图案、机构、签名三者之一不对；返回 [签名, 说明, 哪一项不对]
 function forged(key) {
   const s = genuine(key);
   const how = pick(['glyph', 'issuer', 'print']);
@@ -83,7 +81,7 @@ function forged(key) {
     chars[i] = pick([...'0123456789ABCDEF'].filter((c) => c !== chars[i]));
     s.print = chars.join('');
   }
-  return [s, { glyph: '签名图案与规则手册不符', issuer: '签发机构与规则手册不符', print: '签名指纹与规则手册不符' }[how], how];
+  return [s, { glyph: '签名图案与规则手册不符', issuer: '签发机构与规则手册不符', print: '签名与规则手册不符' }[how], how];
 }
 
 // —— 规则手册 ——
@@ -92,13 +90,14 @@ const RULES = [
   { key: 'docs', head: '每个请求须出示凭证和令牌' },
   { key: 'region', head: '凭证地区须为支持地区' },
   { key: 'locale', head: '语言和时区须与地区一致' },
+  { key: 'isp', head: '令牌运营商须与凭证地区一致', hidden: true },
   { key: 'date', head: '证件须在有效期内' },
   { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
   { key: 'match', head: '证件上的 IP 须与本人一致' },
   { key: 'api', head: 'API 调用须另出示 API 授权' },
   { key: 'scope', head: 'API 授权的用途须与请求一致' },
-  { key: 'sig', head: '证件须有合法的数字签名' },
-  { key: 'wanted', head: '特别关注对象的请求须拦截', hidden: true },
+  { key: 'sig', head: '凭证与 API 授权须有合法的数字签名' },
+  { key: 'wanted', head: '特别关注对象的请求须拒绝', hidden: true },
   { key: 'sms', head: '头像 / 昵称不符时可验证 SMS', hidden: true },
 ];
 
@@ -106,7 +105,7 @@ const RULES = [
 //   rules / continents   手册「基本条例」「支持地区」两页；seals = 手册有没有「签名详情」一页
 //   regions              合规请求的凭证地区（其余地区都算不支持）
 //   tok / kinds          要不要令牌；请求类型（'chat' / 'api'）
-//   tokRows / tokSig     令牌上印哪些栏位（默认 IP、语言、时区、签发、有效期）；令牌带不带数字签名
+//   tokRows             令牌上印哪些栏位（默认 IP、运营商、语言、时区、签发、有效期）；令牌没有数字签名
 //   credRows / sig       凭证上印哪些栏位；证件带不带数字签名
 //   flaws / legit        会出的问题（null = 全部）；本人换过头像 / 改过昵称的比例
 //   wanted               有没有特别关注对象
@@ -115,7 +114,7 @@ const RULES = [
 //   voucher / foreign    启用请求券时，美国以外的支持地区请求要持券；随机请求里这类外国请求的比例
 const FULL_RULES = {
   rules: RULES, continents: CONTINENTS, seals: true, regions: REGIONS_OK, tok: true, kinds: ['chat', 'api'],
-  tokRows: ['IP', '语言', '时区', '签发', '有效期'], tokSig: true,
+  tokRows: ['IP', '运营商', '语言', '签发', '有效期'],
   credRows: ['IP', '昵称', '地区', '套餐', '有效期'], sig: true, flaws: null, legit: P_LEGIT, wanted: true,
   redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0,
 };
@@ -127,6 +126,26 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 // 随机 IPv4 地址
 const ipv4 = () => `${rint(1, 223)}.${rint(0, 255)}.${rint(0, 255)}.${rint(1, 254)}`;
+// 令牌上印的「运营商」：一家运营商服务一个地区，格式是「主要城市 · 运营商名」。
+// 合规请求的运营商一定属于凭证地区；只有 isp 问题会把令牌印成别处的运营商，
+// 拿令牌的「运营商」和凭证的「地区」比对就能查出来。
+const ISPS = [
+  ['ANTHROTZKA', '纽约', '美国'],
+  ['NOVALINK', '伦敦', '英国'],
+  ['KESTREL', '东京', '日本'],
+  ['MERIDIAN', '柏林', '德国'],
+  ['ORBITAL', '新加坡', '新加坡'],
+  ['CIRRUS', '上海', '中国大陆'],
+  ['HARBOUR', '香港', '中国香港'],
+  ['AURORA', '莫斯科', '俄罗斯'],
+  ['PARSA', '德黑兰', '伊朗'],
+  ['CHOSON', '平壤', '朝鲜'],
+];
+// 凭证地区对应的运营商：主要城市写在名称前面，方便和凭证地区对照
+const ispOf = (region) => {
+  const [name, city] = ISPS.find((x) => x[2] === region) || ISPS[0];
+  return `${city} · ${name}`;
+};
 const digits = (n) => Array.from({ length: n }, () => rint(0, 9)).join('');
 const phoneNum = (region) => `${PHONE_CC[region] || '+1'} ${rint(2, 9)}${digits(2)}-${digits(3)}-${digits(4)}`;
 // 改号码里的一位数字（国家码不动）
@@ -185,7 +204,8 @@ const QUESTIONS = {
   no_cred: '你没有出示凭证。', no_tok: '你没有出示令牌。', no_voucher: '外国请求需要出示有效请求券。',
   scope: '授权的用途与请求不一致。', wanted: '你已被列为特别关注对象。',
   phone: '你的手机号和档案上的不一致。', oldname: '证件上的昵称不在你的曾用名里。',
-  locale: '令牌上的语言和时区与你的凭证地区不一致。',
+  locale: '令牌上的语言 / 时区与你的凭证地区不一致。',
+  isp: '令牌上的运营商不在你的凭证地区。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -204,6 +224,7 @@ const EXCUSES = {
   phone: ['我换过号码。', '可能是我记错了。', '……那是旧号码。'],
   oldname: ['可能是系统没更新。', '我改过好几次名字。', '……'],
   locale: ['语言是我自己设的。', '时区跟语言不一样很正常吧？', '……我朋友的账号。'],
+  isp: ['我用的是漫游网络。', '可能接了代理。', '……运营商搞错了吧。'],
 };
 
 // ———————————————— 生成请求 ————————————————
@@ -212,18 +233,22 @@ const EXCUSES = {
 // wanted：特别关注对象的头像，普通请求不会用到这几个头像；rs：这一班的规则组
 function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const kind = rs.kinds.includes('api') && Math.random() < 0.35 ? 'api' : 'chat';
-  let kinds = ['region', 'locale', 'photo', 'ip', 'name', 'exp', 'exp', 'sig', 'sig', 'no_cred', 'no_voucher', 'future'];
+  let kinds = ['region', 'locale', 'isp', 'photo', 'ip', 'name', 'exp', 'exp', 'sig', 'sig', 'no_cred', 'no_voucher', 'future'];
   if (kind === 'api') kinds.push('no_api', 'no_api', 'scope', 'scope');
   if (rs.flaws) kinds = kinds.filter((k) => rs.flaws.includes(k));
   // 令牌缺失只在规则组明确列出时启用（第四天起），不改变无尽模式原本的出题
   if (rs.tok && rs.flaws && rs.flaws.includes('no_tok')) kinds.push('no_tok');
+  // 令牌上真的印出来的栏位（默认全集；故事模式的窄版令牌用 rs.tokRows 收窄）
+  const tokRows = rs.tokRows || ['IP', '运营商', '语言', '时区', '签发', '有效期'];
   // 未来签发：令牌上要有「签发」栏，且规则组启用隐藏条例「签发日期不得晚于系统日期」（第五天起 / 无尽模式）
-  const tokHasIssued = rs.tok && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('签发');
+  const tokHasIssued = rs.tok && tokRows.includes('签发');
   if (!tokHasIssued || !rs.rules.some((r) => r.key === 'issued')) kinds = kinds.filter((k) => k !== 'future');
-  // 语言 / 时区：令牌上要有这两栏，且这一班启用「语言和时区须与地区一致」（无尽模式；故事模式的窄版令牌没有）
-  const tokHasLocale = rs.tok && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('语言')
-    && (rs.tokRows || ['IP', '语言', '时区', '签发', '有效期']).includes('时区');
+  // 语言 / 时区：令牌上至少印了其中一栏（目前只印语言，时区留给之后的规则组），
+  // 且这一班启用「语言和时区须与地区一致」（无尽模式；故事模式的窄版令牌没有）
+  const tokHasLocale = rs.tok && (tokRows.includes('语言') || tokRows.includes('时区'));
   if (!tokHasLocale || !rs.rules.some((r) => r.key === 'locale')) kinds = kinds.filter((k) => k !== 'locale');
+  // 运营商：令牌上要印「运营商」栏（第四天起与无尽模式）才可能出「运营商与地区不符」
+  if (!rs.tok || !tokRows.includes('运营商')) kinds = kinds.filter((k) => k !== 'isp');
   // 凭证缺失只能对照条例「每个请求须出示凭证（和令牌）」发现；当天没有这条条例就不出
   if (!rs.rules.some((r) => r.key === 'docs')) kinds = kinds.filter((k) => k !== 'no_cred' && k !== 'no_tok');
   if (!rs.tok) kinds = kinds.filter((k) => k !== 'no_tok');
@@ -250,11 +275,10 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       ? (foreign ? pick(foreignRegions) : homeRegion)
       : pick(rs.regions);
   const [lang, tz] = REGION_LOCALE[region] || ['en-US', 'UTC+00:00'];
-  // 令牌上印哪些栏位（第四天起是窄版令牌：没有语言、时区），带不带签名指纹
-  const tokRows = rs.tokRows || ['IP', '语言', '时区', '签发', '有效期'];
-
   const cred = { photo: avatar, IP: ip, 昵称: handle, 地区: region, 套餐: pick(PLANS), 有效期: day(20, 900), sig: rs.sig ? genuine('cred') : null };
-  const tok = rs.tok ? { IP: ip, 语言: lang, 时区: tz, 签发: day(-3, 0), 有效期: day(0, 6), sig: rs.tokSig === false ? null : genuine('tok') } : null;
+  const tok = rs.tok
+    ? { IP: ip, 运营商: ispOf(region), 语言: lang, 时区: tz, 签发: day(-3, 0), 有效期: day(0, 6) }
+    : null;
   const api = kind === 'api' ? {
     持有人: handle, IP: ip, 用途: flaw === 'scope' ? pick(SCOPES.filter((s) => s !== scope)) : scope,
     有效期: day(5, 300), sig: genuine('api'),
@@ -331,10 +355,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     issue([['tok.签发', 'sys.日期']], '签发日期未到', `令牌签发 ${tok.签发}   VS   系统日期 ${fmtDate(today)}`, 'future');
     spec.reason = '令牌的签发日期晚于当前日期（伪造证件）';
   } else if (flaw === 'locale') {
-    // 令牌上的语言 / 时区必须和凭证地区一致；对照手册「支持地区」页（地区、语言、时区三栏）
+    // 令牌上的语言 / 时区必须和凭证地区一致；只比对令牌上真的印了的栏位（目前是语言，时区留给之后的规则组）
     const langs = Object.values(REGION_LOCALE).map((v) => v[0]);
     const tzs = Object.values(REGION_LOCALE).map((v) => v[1]);
-    const which = pick(['lang', 'tz', 'both']);
+    const canLang = tokRows.includes('语言'), canTz = tokRows.includes('时区');
+    const which = canLang && canTz ? pick(['lang', 'tz', 'both']) : canLang ? 'lang' : 'tz';
     const pairs = [];
     let sub = `凭证地区：${cred.地区}`;
     if (which !== 'tz') {
@@ -353,12 +378,22 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       ? `令牌的语言 / 时区与凭证地区（${cred.地区}）不符`
       : which === 'lang' ? `令牌语言（${tok.语言}）与凭证地区（${cred.地区}）不符`
         : `令牌时区（${tok.时区}）与凭证地区（${cred.地区}）不符`;
+  } else if (flaw === 'isp') {
+    // 令牌的运营商必须属于凭证地区：印上别处的运营商（主要城市不在凭证地区）
+    const [name, city] = pick(ISPS.filter((x) => x[2] !== cred.地区));
+    tok.运营商 = `${city} · ${name}`;
+    const pairs = [['tok.运营商', 'cred.地区']];
+    if (rs.rules.some((r) => r.key === 'isp')) pairs.push(['tok.运营商', 'rule.isp']);
+    issue(pairs, '运营商与地区不符',
+      `凭证地区：${cred.地区}   令牌运营商：${tok.运营商}`, 'isp');
+    spec.reason = `令牌运营商（${tok.运营商}）与凭证地区（${cred.地区}）不符`;
   } else if (flaw === 'sig') {
-    const k = withDocs(['cred', 'tok', 'api']);
+    // 只有凭证和 API 授权带签名：令牌没有签名，伪造签名不会落在令牌上
+    const k = withDocs(['cred', 'api']);
     const [s, sub, how] = forged(k);
     docs[k].sig = s;
-    // 令牌的签发机构和指纹也印在通告第 1 页底部
-    issue([[`${k}.签名`, `book.${k}`]].concat(k === 'tok' && how !== 'glyph' ? [['tok.签名', 'notice.tok']] : []), '签名不合法', sub);
+    // 凭证的签发机构和签名也印在通告第 1 页底部；图案只印在手册的「签名详情」页
+    issue([[`${k}.签名`, `book.${k}`]].concat(k === 'cred' && how !== 'glyph' ? [['cred.签名', 'notice.cred']] : []), '签名不合法', sub);
     spec.reason = `${DOC_NAMES[k]}的数字签名不合法（${sub}）`;
   } else if (flaw === 'no_api') {
     docs.api = null;
@@ -373,6 +408,8 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     issue([['rv.头像', n], ['cred.照片', n]], '特别关注对象', `本人头像与通告中的特别关注对象 ${WANTED_TAGS[wi]} 一致`);
     spec.reason = `本人为特别关注对象 ${WANTED_TAGS[wi]}`;
   }
+
+  // 令牌的运营商属于凭证地区，不随 IP 变动：IP 不符的令牌改过 IP，运营商仍然对得上地区
 
   // 第三天：地区条例仍在。支持地区（含美国）都比得过去；不在支持地区的是 region 问题。
   // 请求券条例只管非美国请求：本国请求注明免券，持有效请求券的外国请求注明已持券
@@ -414,17 +451,22 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     if (rs.voucher && flaw !== 'region') pair('cred.地区', 'rule.voucher');
     pair('cred.昵称', 'rv.昵称');
   }
-  // 语言 / 时区：对照凭证地区与手册「支持地区」页
+  // 语言 / 时区：对照凭证地区与手册「支持地区」页（只登记令牌上真的印了的栏位）
   const hasLocaleRule = rs.rules.some((r) => r.key === 'locale');
   if (docs.cred && hasLocaleRule) {
     for (const k of ['语言', '时区']) {
-      if (!docs.tok || !docs.tok[k]) continue;
+      if (!tokRows.includes(k) || !docs.tok || !docs.tok[k]) continue;
       pair(`tok.${k}`, 'cred.地区');
       pair(`tok.${k}`, 'rule.locale');
       pair(`tok.${k}`, 'rule.region');
     }
   }
-  if (docs.tok && docs.tok.sig) pair('tok.签名', 'notice.tok');
+  // 运营商：主要城市属于凭证地区。合规请求一定对得上（无矛盾）；只有 isp 问题会印成别处的运营商
+  if (docs.cred && docs.tok && tokRows.includes('运营商') && docs.tok.运营商) {
+    pair('tok.运营商', 'cred.地区');
+    if (rs.rules.some((r) => r.key === 'isp')) pair('tok.运营商', 'rule.isp');
+  }
+  if (docs.cred && docs.cred.sig) pair('cred.签名', 'notice.cred');
   wanted.forEach((_, i) => { pair('rv.头像', `notice.wanted${i}`); if (docs.cred) pair('cred.照片', `notice.wanted${i}`); });
   const hasIssuedRule = rs.rules.some((r) => r.key === 'issued');
   for (const k of ['cred', 'tok', 'api']) {
@@ -455,11 +497,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   }
   if (kind === 'api') pair('rv.类型', 'rule.api');
 
-  // 凭证缺失时柜台上没有凭证：临时返回票由 station.js 在询问「凭证缺失」之后才派发到桌面
+  // 凭证缺失时柜台上没有凭证：临时返回页由 station.js 在询问「凭证缺失」之后才派发到桌面
   spec.docs = [];
   if (docs.cred) spec.docs.push(new Doc('cred', rs.credRows.map((k) => [k, cred[k]]), cred.sig, cred.photo));
   if (docs.voucher) spec.docs.push(new Doc('voucher', [['有效期', docs.voucher.有效期]], null));
-  if (docs.tok) spec.docs.push(new Doc('tok', tokRows.map((k) => [k, docs.tok[k]]), docs.tok.sig));
+  if (docs.tok) spec.docs.push(new Doc('tok', tokRows.map((k) => [k, docs.tok[k]]), null));
   if (docs.api) spec.docs.push(new Doc('api', ['持有人', 'IP', '用途', '有效期'].map((k) => [k, docs.api[k]]), docs.api.sig));
   return spec;
 }

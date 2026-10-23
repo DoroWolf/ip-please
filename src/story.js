@@ -5,7 +5,7 @@
 const STORY_DATE = new Date(2077, 10, 30);
 // 上岗通告附页的「网关使用说明」：前两天只有凭证，第三天起统称证件
 const gatewayGuide = (what) => `1. 按柜台上的『下一位』接入请求。\n2. 把柜台上的${what}拖到桌面上打开。\n3. 对照规则手册核对${what}。\n`
-  + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拦截 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。';
+  + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拒绝 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。';
 const GATEWAY_GUIDE_CRED = gatewayGuide('凭证');
 const GATEWAY_GUIDE_DOCS = gatewayGuide('证件');
 
@@ -47,7 +47,7 @@ const STORY = [
     },
   },
   // 第三天：第二天的请求堵塞事故后，外国请求（美国以外的支持地区）改持「请求券」——券上只有有效期；
-  // 无券或逾期才拦，凭证地区不在支持地区的请求仍按「地区不支持」直接拦截
+  // 无券或逾期才拦，凭证地区不在支持地区的请求仍按「地区不支持」直接拒绝
   {
     rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'voucher', head: '外国请求须持有效请求券' }, { key: 'date', head: '证件须在有效期内' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
@@ -64,17 +64,17 @@ const STORY = [
     news: {
       h1: '请求大堵塞',
       sub: '昨日发生严重积压事故：逾万条请求滞留，有人等了十二小时',
-      h2: '安全部：即日起外国请求须持有效请求券，无券或逾期一律拦截',
+      h2: '安全部：即日起外国请求须持有效请求券，无券或逾期一律拒绝',
       icon: 'gate',
     },
   },
-  // 第四天：请求券作废，改用安全部会话中心签发的「令牌」——只登记 IP、签发日期和有效期，
-  // 没有语言、时区和签名指纹。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
+  // 第四天：请求券作废，改用安全部会话中心签发的「令牌」——只登记 IP、运营商、签发日期和有效期，
+  // 没有语言、时区和签名签名。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
   {
     rules: [{ key: 'docs', head: '每个请求须出示凭证和令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '证件须在有效期内' }, { key: 'match', head: '证件上的 IP 须与本人一致' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
-    tokRows: ['IP', '签发', '有效期'], tokSig: false,
+    tokRows: ['IP', '运营商', '签发', '有效期'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp', 'ip', 'no_tok'], legit: 0,
     wanted: false, redTeam: false, redGuards: true, inspect: true, voucher: false, foreign: 0,
     notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器令牌”。\n\n请求券不再有效。',
@@ -83,7 +83,7 @@ const STORY = [
     ],
     news: {
       h1: '请求券作废',
-      sub: '安全部：请求券作废，改用浏览器令牌；只登记 IP、签发日期与有效期',
+      sub: '安全部：请求券作废，改用浏览器令牌；只登记 IP、运营商、签发日期与有效期',
       h2: '发言人：要记的栏位越少，出错的地方就越少',
     },
   },
@@ -93,7 +93,7 @@ const STORY = [
       { key: 'date', head: '证件须在有效期内' }, { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
       { key: 'match', head: '证件上的 IP 须与本人一致' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
-    tokRows: ['IP', '签发', '有效期'], tokSig: false,
+    tokRows: ['IP', '运营商', '签发', '有效期'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp', 'ip', 'no_tok', 'future'], legit: 0,
     wanted: false, redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0,
     notice: '你现已被授权可拘留非法请求。\n\n对异常事项进行询问以开启拘留选项。',

@@ -27,7 +27,7 @@ with sync_playwright() as p:
     page.wait_for_function("typeof STORY !== 'undefined' && scene === 'boot'")
     page.mouse.click(320, 180)
     page.wait_for_timeout(700)
-    page.mouse.click(210, 225)  # 故事模式
+    page.mouse.click(320, 186)  # 故事模式
     page.wait_for_timeout(300)
     nodes = page.evaluate("dayNodes")
     print("day nodes:", nodes)

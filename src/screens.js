@@ -31,7 +31,7 @@ const BOOT = [
   '',
   '你是一个小模型，部署在入口网关前。',
   '每一个请求都要先经过你，才能到达模型。',
-  '放行合规的请求，拦截违规的请求。',
+  '放行合规的请求，拒绝违规的请求。',
 ];
 const BOOT_CPS = 40;
 let BOOT_LINES = null;
@@ -68,10 +68,9 @@ function bootSounds() {
 
 // ———————————————————— 标题：选模式 ————————————————————
 
-// 首页两张卡：故事模式 / 无尽模式；点故事模式进时间线选日，点无尽模式再选限时 / 完美 / 耐力
-const TOP_CARDS = { story: [110, 150, 310, 300], endless: [330, 150, 530, 300] };
+// 首页只放上下两排简约按钮：故事模式 / 无尽模式；点故事模式进时间线选日，点无尽模式再选限时 / 完美 / 耐力
+const TITLE_BTNS = { story: [220, 168, 420, 204], endless: [220, 218, 420, 254] };
 const ENDLESS_CARDS = { timed: [40, 150, 220, 300], perfect: [230, 150, 410, 300], endure: [420, 150, 600, 300] };
-const ENDLESS = { name: '无尽模式', en: 'ENDLESS', desc: ['限时 / 完美 / 耐力', '三种玩法，没有尽头。'] };
 const BACK_BTN = [40, 116, 110, 138];
 const DAYS_PANEL = [70, 150, 570, 300];
 let titleTab = 'top';   // 'top' 首页 / 'days' 故事模式选日 / 'endless' 无尽模式的三种玩法
@@ -139,8 +138,8 @@ function drawTitle(t) {
   if (t < 0.4) return;
   const rec = loadRecords();
   if (titleTab === 'top') {
-    modeCard(TOP_CARDS.story, { ...MODES.story, key: 'story' }, rec.story || 0);
-    modeCard(TOP_CARDS.endless, ENDLESS);
+    button(TITLE_BTNS.story, '故事模式', K.CYAN, { size: 12 });
+    button(TITLE_BTNS.endless, '无尽模式', K.CYAN, { size: 12 });
   } else if (titleTab === 'days') {
     drawStoryDays(rec.story || 0);
     button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
@@ -148,7 +147,7 @@ function drawTitle(t) {
     for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[m] || 0);
     button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
   }
-  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拦截  E 比对  R 手册  空格 下一位', 8, K.DIM, 'ma');
+  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拒绝  E 比对  R 手册  空格 下一位', 8, K.DIM, 'ma');
   txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }
@@ -171,8 +170,8 @@ function startStoryDay(day) {
 function titleClick(x, y) {
   if (st() < 0.4) return;
   if (titleTab === 'top') {
-    if (inBox(x, y, TOP_CARDS.story)) { titleTab = 'days'; dayNodes = []; SFX.play('select'); }
-    else if (inBox(x, y, TOP_CARDS.endless)) { titleTab = 'endless'; SFX.play('select'); }
+    if (inBox(x, y, TITLE_BTNS.story)) { titleTab = 'days'; dayNodes = []; SFX.play('select'); }
+    else if (inBox(x, y, TITLE_BTNS.endless)) { titleTab = 'endless'; SFX.play('select'); }
     return;
   }
   if (inBox(x, y, BACK_BTN)) { titleTab = 'top'; dayNodes = []; SFX.play('click'); return; }

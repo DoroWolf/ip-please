@@ -65,7 +65,7 @@ function drawPipe() {
   const wx = (gx0 + gx1) >> 1;
   line(wx, PIPE[1], wx, gy0 - 1, K.CYAN_D);
   line(wx, gy1 + 1, wx, PIPE[3], K.CYAN_D);
-  // 出口：绿色向上 = 放行，红色向下 = 拦截（直接通到上下边界，不显示去向和数量）
+  // 出口：绿色向上 = 放行，红色向下 = 拒绝（直接通到上下边界，不显示去向和数量）
   const bx = SPLIT_X;
   line(gx1 + 1, LANE_Y, bx, LANE_Y, K.LINE);
   line(bx, PIPE[1], bx, PIPE[3], K.LINE);
@@ -275,7 +275,7 @@ function drawTray() {
       const over = holding && inBox(ptr.x, ptr.y, b);
       frame(b[0] + dx, b[1], b[2] + dx, b[3], rgb(col), over ? rgba(col, 0.35) : rgba(colD, holding ? 0.8 : 0.45));
       const cx = ((b[0] + b[2]) >> 1) + dx;
-      txt(cx, b[1] + 13, k === 'approve' ? '放行' : '拦截', 12, rgb(col), 'ma');
+      txt(cx, b[1] + 13, k === 'approve' ? '放行' : '拒绝', 12, rgb(col), 'ma');
       txt(cx, b[1] + 31, k === 'approve' ? 'APPROVE' : 'DENY', 8, K.DIM, 'ma');
     }
   }

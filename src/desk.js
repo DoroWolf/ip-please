@@ -88,12 +88,12 @@ function dropDoc(win, x, y, remove) {
   const zone = stampZoneAt(x, y);
   if (zone) {
     if (!isStampDoc(win)) {
-      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先比对出「凭证缺失」并询问，拿到临时返回票再盖章', K.AMBER);
+      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先比对出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER);
     } else decide(zone);
     return true;
   }
   if (!inBox(x, y, AVATAR_BOX)) return false;
-  if (!e.decided) { toast(`先把${stampName(e)}拖到右侧的 放行 / 拦截 栏`, K.AMBER); return true; }
+  if (!e.decided) { toast(`先把${stampName(e)}拖到右侧的 放行 / 拒绝 栏`, K.AMBER); return true; }
   remove();
   layoutIcons();
   SFX.play('select', 0.6);

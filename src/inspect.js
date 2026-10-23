@@ -78,7 +78,7 @@ function askAbout(issue) {
   if (!e || e.leaving || e.asked.has(issue)) return;   // 同一异常只问一次；新的异常才能再问
   e.asked.add(issue);
   e.measureReady = true;   // 询问异常后解锁措施按钮
-  issueReturnTicket(e);    // 没有凭证时，询问「凭证缺失」之后才派发临时返回票
+  issueReturnTicket(e);    // 没有凭证时，询问「凭证缺失」之后才派发临时返回页
   say('C', QUESTIONS[issue.type]);
   later(0.9, () => { if (D.ent === e) say('E', issue.ask); });
 }
