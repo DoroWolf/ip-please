@@ -10,11 +10,14 @@ function loadRecords() {
 // 纪录的键：难度 1 沿用原来的模式名（旧纪录照样有效），更高难度另存一份
 const recordKey = (m, diff = 1) => (m === 'story' || diff <= 1 ? m : `${m}@${diff}`);
 
+// 结算分数：耐力模式取本局到达过的最高 token（RUN.score 是当下的 token，结束时可能已经扣成负的），其余模式就是 RUN.score
+const finalScore = () => (RUN.mode === 'endure' ? RUN.peak : RUN.score);
+
 // 各模式只记最好成绩：限时 / 完美 / 耐力 = 分数（每个难度各一份），故事 = 天数
 function saveRecord() {
   const r = loadRecords();
   const key = recordKey(RUN.mode, RUN.diff);
-  const v = RUN.mode === 'story' ? RUN.day : RUN.score;
+  const v = RUN.mode === 'story' ? RUN.day : finalScore();
   RUN.best = r[key] || 0;
   RUN.newBest = v > RUN.best;
   if (RUN.newBest) {
@@ -410,7 +413,7 @@ function drawResult(t) {
   // 结算只显示该模式该看的东西：限时看分数；完美 / 耐力看用时和分数
   if (m === 'timed') row('得分', `${RUN.score}`, K.CLAUDE_L);
   if (m === 'perfect') { row('用时', mmss(RUN.time), K.WHITE); row('得分', `${RUN.score}`, K.CLAUDE_L); }
-  if (m === 'endure') { row('用时', mmss(RUN.time), K.WHITE); row('最高得分', `${RUN.score}`, K.CLAUDE_L); }
+  if (m === 'endure') { row('用时', mmss(RUN.time), K.WHITE); row('最高得分', `${finalScore()}`, K.CLAUDE_L); }
   if (m === 'story') { row('坚持天数', `${RUN.day}`, K.CLAUDE_L); row('累计正确', `${RUN.correct}`, K.GREEN); row('累计事故', `${RUN.incidents}`); }
   // 完美 / 耐力不显示事故原因的红字；故事模式的停机原因保留
   if (m === 'story' && RUN.fail) { y += 6; RUN.fail.forEach((s) => { txt(W / 2, y, s, 10, K.RED, 'ma'); y += 14; }); }

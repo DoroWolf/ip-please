@@ -372,7 +372,8 @@ function workOver() {
 function finishRun() {
   if (D.ended) return;
   D.ended = true;
-  if (RUN.mode === 'endure') RUN.score = RUN.peak;   // 耐力模式：分数为到达过的最大 token
+  // 耐力模式的结算分数取到达过的最大 token，但不要改写 RUN.score：
+  // 转场压黑时 HUD 还画着 RUN.score，改写会让顶部的 Token 突然跳到最高值（见 screens.js 的 finalScore）
   saveRecord();
   fadeGo('result', 0.9, 0.5);   // 先慢慢压黑，再从黑屏进入结算
 }

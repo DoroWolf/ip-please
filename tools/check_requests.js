@@ -663,7 +663,7 @@ for (let i = 0; i < 3000; i++) {
 {
   const rb = new Rulebook(FULL_RULES_2);
   const texts = rb.pages.flatMap((p) => p.rows.map((r) => r.s));
-  for (const s of ['每个请求须出示凭证、令牌和环境信息卡', '语言和时区须与地区一致', `企业账户须出示凭证和含 ${HOST_CORP} 的企业授权`, '时区', 'UTC-05:00', '四、企业名录']) {
+  for (const s of ['每个请求须出示凭证、令牌和环境信息卡', '语言和时区须与地区一致', `企业账户需出示企业授权`, '时区', 'UTC-05:00', '四、企业名录']) {
     if (!texts.includes(s)) fail(`難度 2 手冊缺少：${s}`, {});
   }
   if (!rb.pages.some((p) => p.fields['rule.ent'])) fail('難度 2 手冊缺少企業授權條例欄位', {});

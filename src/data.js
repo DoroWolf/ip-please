@@ -161,7 +161,7 @@ const RULES = [
 // 无尽模式难度 2：每个请求还要出示环境信息卡；企业账户改凭企业授权（授权书须写明 Anthrotzka，否则视为无效证件）
 const RULES_2 = RULES.flatMap((r) => {
   if (r.key === 'docs') return [{ ...r, head: '每个请求须出示凭证、令牌和环境信息卡' }];
-  if (r.key === 'scope') return [r, { key: 'ent', head: `企业账户须出示凭证和含 ${HOST_CORP} 的企业授权` }];
+  if (r.key === 'scope') return [r, { key: 'ent', head: `企业账户需出示企业授权` }];
   return [r];
 });
 
