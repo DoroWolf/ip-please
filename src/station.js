@@ -26,11 +26,9 @@ const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W 
 const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
-// 审查窗里的可比对栏位：IP / 昵称 / 类型，以及请求摘要（和 API 授权的用途核对）。
-// 请求摘要框含标签和最多三行摘要（178 / 190 + 10 * i），下缘停在对话分隔线之前
+// 审查窗里的可比对栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在令牌上（tok.请求）。
 const RV_FIELDS = {
   'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
-  'rv.请求': [RV_X - 3, 176, 209, 222],
 };
 // 柜台：审查窗下方放证件的一排（按钮右边）。没有证件时，拿空柜台和条例比对
 const COUNTER_BOX = [76, 318, 205, 356];
@@ -188,7 +186,9 @@ function callNext() {
   D.hinted.next = true;
   say('C', '下一个请求。');
   const k = mode().pace;
-  later(0.5 * k, () => { if (D.ent === e) say('E', `${spec.greet} ${spec.task}`, 'req'); });
+  // 请求摘要印在令牌上：没有令牌时本人只会打招呼，不会主动说明来意
+  const said = spec.taskOnTok ? `${spec.greet} ${spec.task}` : spec.greet;
+  later(0.5 * k, () => { if (D.ent === e) say('E', said, spec.taskOnTok ? 'req' : null); });
   later(1.2 * k, () => handDocs(e));
 }
 
@@ -223,7 +223,7 @@ const stampName = (e) => (e && !e.spec.docs.some((d) => d.key === 'cred') ? '临
 function issueReturnTicket(e) {
   if (!e || e.leaving || stampDocOf(e)) return;   // 有凭证 / 已经派发过就不重复派发
   // 版面只印一行：这张票只用于拒绝请求
-  const doc = new Doc('return', [['', '仅用于拒绝请求']], null);
+  const doc = new Doc('return', [['', '仅限用于拒绝请求']], null);
   e.spec.docs.push(doc);
   addWin(doc, 'doc', ...clampDesk(250, 160, doc));
   SFX.play('select');
@@ -282,6 +282,8 @@ function judge(e, kind) {
   const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null);
   RUN.processed++; D.total++;
   if (RUN.mode === 'timed') RUN.score++;
+  // 放行：网关对通过的请求说一句标准招呼
+  if (kind === 'approve') say('C', '欢迎使用 Claude。');
   if (right) {
     RUN.correct++; D.correct++; RUN.streak++;
     if (kind === 'suspend') RUN.detained++;

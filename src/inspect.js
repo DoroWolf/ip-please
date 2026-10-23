@@ -119,7 +119,9 @@ function smsSend(w) {
   });
   later(1.6, () => {
     if (D.ent !== e || e.leaving) return;
-    const rec = new InfoWin('sms', '身份档案', 'RECORD', [['昵称', e.spec.handle, true], ['手机', s.phone, true], ['曾用名', s.names.join('、'), true]]);
+    const rec = new InfoWin('sms', '身份档案', 'RECORD',
+      [['昵称', e.spec.handle, true], ['曾用名', s.names.length ? s.names.join('、') : '无', true], ['手机', s.phone, true]],
+      '用户的手机与请求的昵称必须与此档案一致');
     addWin(rec, 'sms', ...clampDesk(250, 214, rec));
     SFX.play('intercom', 0.6);
     toast('身份档案已打印：核对手机号或曾用名', K.GREEN);

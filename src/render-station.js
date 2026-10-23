@@ -126,10 +126,7 @@ function drawReview() {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
     txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? K.TEXT : K.DIM_D);
   });
-  if (ready) {
-    txt(RV_X, 178, '请求摘要', 8, K.DIM);
-    wrap(s.task, 8, x1 - RV_X - 8).slice(0, 3).forEach((ln, i) => txt(RV_X, 190 + i * 10, ln, 8, K.CYAN_L));
-  }
+  // 请求摘要不画在这里：它印在令牌上，没有令牌就看不到
   // 对话：最近三句
   rect(x0 + 8, 232, x1 - 8, 232, K.LINE);
   const lines = D.lines.slice(-3);

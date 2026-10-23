@@ -84,7 +84,7 @@ with sync_playwright() as p:
         const cred = s.docs.find(d => d.key === 'cred');
         const region = cred.rows.find(r => r[0] === '地区')[1];
         const supported = rules().regions.includes(region);
-        const isHome = region === '美国';
+        const isHome = HOME_REGIONS.includes(region);
         const isForeign = supported && !isHome;
         const isUnsupported = !supported;
         const v = s.docs.find(d => d.key === 'voucher');

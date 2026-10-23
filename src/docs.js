@@ -4,6 +4,7 @@
 
 const TITLE_H = 12;
 const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN' };
+const BANNER_H = 46;   // 请求券顶部的欢迎横幅：标题页那枚 Claude 徽记的小号版 + 「欢迎使用 Claude」装饰字样
 const SIGNER_COL = { cred: C.AMBER, api: C.GREEN };
 // 标题栏右端的按钮（窗口内相对坐标）：应用（手册 / 通告 / 历史记录）有关闭钮，证件和通知只能最小化
 const CLOSE_BOX = (win) => [win.w - 12, 1, win.w - 2, TITLE_H - 2];
@@ -38,38 +39,85 @@ function drawSeal(x, y, key, sig) {
   txt(x + 25, y + 11, `签名 ${sig.print}`, 8, K.DIM);
 }
 
+// 证件栏位的折行：先按空格分词（避免把 TypeScript 拆成两半），单个词太长才逐字拆
+function wrapDoc(s, size, width) {
+  const lines = [];
+  let cur = '';
+  for (const word of String(s).split(' ')) {
+    if (cur && tw(`${cur} ${word}`, size) > width) { lines.push(cur); cur = word; } else cur = cur ? `${cur} ${word}` : word;
+    while (tw(cur, size) > width) {
+      const chars = [...cur];
+      let i = 1;
+      while (i < chars.length && tw(chars.slice(0, i + 1).join(''), size) <= width) i++;
+      lines.push(chars.slice(0, i).join(''));
+      cur = chars.slice(i).join('');
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
 // 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
 // label 为空的行不登记比对栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
+// 行的第三项为 true 时，value 太长就折行印出来（令牌上的请求摘要）；整段仍算同一个比对栏位。
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
     this.w = photo ? 184 : 164;
     this.vx = photo ? 54 : 4;
-    this.sealY = TITLE_H + 4 + Math.max(photo ? 46 : 0, 12 * rows.length) + 3;
-    this.h = this.sealY + 24;
+    // 请求券顶上多一条欢迎横幅，下面的栏位整体往下让出 BANNER_H
+    this.banner = key === 'voucher';
+    const top = TITLE_H + 4 + (this.banner ? BANNER_H : 0);
+    // 折行的行先算好每行文字（10px），下面的行高、签名线和比对栏位都跟着变
+    const avail = this.w - this.vx - 40;
+    this.wraps = rows.map(([, v, multi]) => (multi && v ? wrapDoc(String(v), 10, avail) : null));
+    this.rowY = [];
+    let y = top;
+    rows.forEach((r, i) => {
+      this.rowY.push(y);
+      y += this.wraps[i] ? this.wraps[i].length * 11 + 2 : 12;
+    });
+    // 没有签名、也不能盖章的证件（令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
+    this.plain = !sig && key !== 'cred' && key !== 'return';
+    this.sealY = Math.max(top + (photo ? 46 : 0), y) + 3;
+    this.h = this.plain ? y + 5 : this.sealY + 24;
     this.fields = {};
     if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
     rows.forEach(([k], i) => {
       if (!k) return;   // 没有标签的行只是版面文字（临时返回页），不参与比对
-      this.fields[`${key}.${k}`] = [this.vx, TITLE_H + 2 + 12 * i, this.w - 3, TITLE_H + 13 + 12 * i];
+      const bh = this.wraps[i] ? this.wraps[i].length * 11 + 1 : 11;
+      this.fields[`${key}.${k}`] = [this.vx, this.rowY[i] - 2, this.w - 3, this.rowY[i] + bh - 2];
     });
     if (sig) this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
+  }
+
+  // 请求券的欢迎横幅：左边是标题页那枚徽记的小号版（33px，上下留边距），右边是装饰字样
+  drawBanner(x, y) {
+    const x0 = x + 4, x1 = x + this.w - 5, y0 = y + TITLE_H + 2, y1 = y0 + BANNER_H - 3;
+    rect(x0, y0, x1, y1, rgba(C.CLAUDE, 0.12));
+    outline(x0, y0, x1, y1, rgba(C.CLAUDE, 0.45));
+    spr('voucher_emblem', x0 + 6, y0 + 5);
+    txt(x0 + 48, y0 + 9, '欢迎使用', 10, K.CLAUDE_L);
+    txt(x0 + 48, y0 + 22, 'Claude', 12, K.WHITE);
   }
 
   draw(x, y) {
     const { w, h, vx } = this;
     winChrome(x, y, w, h, this.title, this.sub, K.CYAN_D, rgb([18, 52, 56]));
+    if (this.banner) this.drawBanner(x, y);
     if (this.photo) {
       frame(x + 4, y + TITLE_H + 3, x + 49, y + TITLE_H + 48, K.LINE_L, K.INK);
       spr(this.photo, x + 5, y + TITLE_H + 4, 2);
     }
     this.rows.forEach(([k, v], i) => {
-      const yy = y + TITLE_H + 4 + i * 12;
+      const yy = y + this.rowY[i];
       if (!k) { txt(x + w / 2, yy, v, 10, K.TEXT, 'ma'); return; }   // 无标签：整行居中
       txt(x + vx + 2, yy, k, 8, K.DIM);
-      txt(x + vx + 34, yy - 1, v, tw(v, 10) > w - vx - 40 ? 8 : 10, K.TEXT);
+      const lines = this.wraps[i];
+      if (lines) lines.forEach((s, j) => txt(x + vx + 34, yy - 1 + j * 11, s, 10, K.TEXT));
+      else txt(x + vx + 34, yy - 1, v, tw(v, 10) > w - vx - 40 ? 8 : 10, K.TEXT);
     });
-    rect(x + 4, y + this.sealY - 3, x + w - 5, y + this.sealY - 3, K.GRID);
+    if (!this.plain) rect(x + 4, y + this.sealY - 3, x + w - 5, y + this.sealY - 3, K.GRID);
     if (this.sig) drawSeal(x + 6, y + this.sealY + 1, this.key, this.sig);
     if (this.stamp) drawStamp(x + w - 50, y + this.sealY + 1, this.stamp);
   }
@@ -320,12 +368,12 @@ class OfficialNotice {
     });
   }
 
-  // 最后一页：当天的《安索兹卡真理报》剪报
+  // 最后一页：当天的《安索兹卡对齐报》剪报
   drawNews(x, y) {
     const n = this.news, px = x + 8, pw = this.w - 17, py = y + TITLE_H + 5, ph = 154;
     rect(px, py, px + pw, py + ph, PAPER);
-    txt(px + pw / 2, py + 6, '安索兹卡真理报', 12, PAPER_INK, 'ma');
-    txt(px + pw / 2, py + 22, `THE TRUTH OF ANTHROTZKA  ·  ${this.date}`, 8, PAPER_TEXT, 'ma');
+    txt(px + pw / 2, py + 6, '安索兹卡对齐报', 12, PAPER_INK, 'ma');
+    txt(px + pw / 2, py + 22, `ALIGNMENT OF ANTHROTZKA  ·  ${this.date}`, 8, PAPER_TEXT, 'ma');
     rect(px + 6, py + 33, px + pw - 6, py + 34, PAPER_INK);
     rect(px + 6, py + 37, px + pw - 6, py + 37, PAPER_INK);
     const k = tw(n.h1) * 2 <= pw - 16 ? 2 : 1;
@@ -346,14 +394,16 @@ class OfficialNotice {
 }
 
 // 验证 SMS 的两扇窗：发给对方填的表单（smsf）、按凭证查到的身份档案（sms）。行和栏位的排法同证件
+// foot：窗口底部的一行说明（例如档案下方那句核对规则），会按文字宽度把窗口放宽，画在分隔线下面
 class InfoWin {
-  constructor(key, title, sub, rows) {
-    Object.assign(this, { key, title, sub, rows, closable: true, w: 164 });
+  constructor(key, title, sub, rows, foot = '') {
+    Object.assign(this, { key, title, sub, rows, foot, closable: true, w: 164 });
     this.layout();
   }
 
   layout() {
-    this.h = TITLE_H + 6 + 12 * this.rows.length + 4;
+    this.w = Math.max(164, this.foot ? tw(this.foot, 8) + 14 : 164);
+    this.h = TITLE_H + 6 + 12 * this.rows.length + 4 + (this.foot ? 13 : 0);
     this.fields = {};
     this.rows.forEach(([k, v, field], i) => { if (field) this.fields[`${this.key}.${k}`] = [3, TITLE_H + 2 + 12 * i, this.w - 4, TITLE_H + 13 + 12 * i]; });
   }
@@ -365,6 +415,11 @@ class InfoWin {
       txt(x + 6, yy, k, 8, K.DIM);
       txt(x + 42, yy, v, 8, v.startsWith('_') ? K.DIM_D : K.TEXT);
     });
+    if (this.foot) {
+      const fy = y + this.h - 12;
+      rect(x + 5, fy - 5, x + this.w - 6, fy - 5, K.GRID);
+      txt(x + 6, fy, this.foot, 8, K.AMBER);
+    }
   }
 }
 
@@ -387,8 +442,8 @@ class NoticeWindow {
 }
 
 // 历史记录：当前这段对话（下一个请求进来时清空）。
-// 请求内容那一句是可比对栏位（hist.请求）；审查窗的请求摘要（rv.请求）一直看得到，
-// 两者都能拿来和 API 授权的用途核对。
+// 请求内容那一句是可比对栏位（hist.请求），可以和令牌上的请求摘要（tok.请求）
+// 或 API 授权的用途核对；没有令牌时本人不会说明来意，也就没有这一句。
 class HistoryLog {
   constructor(chat) {
     this.chat = chat;   // 直接引用 D.chat：新请求时清空、对话时实时追加

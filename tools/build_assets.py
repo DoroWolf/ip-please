@@ -6,7 +6,7 @@
 
 - 字体图集：扫描 src/ 下所有 JS 与 index.html 里出现的字符，只渲染这些字（缝合像素字体 8/10/12px）
 - 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、默认剪影、少量自拍），统一套像素滤镜；Claude 徽标；
-  故事模式《安索兹卡真理报》的配图
+  故事模式《安索兹卡对齐报》的配图
 产物是一个 JS 文件（图片以 base64 内嵌），所以 index.html 直接双击也能玩。
 """
 import base64
@@ -22,7 +22,7 @@ TOOLS = Path(__file__).resolve().parent
 SITE = TOOLS.parent
 sys.path.insert(0, str(TOOLS))
 
-from pp.base import CLAUDE, CLAUDE_L, FONTS, draw, spark, txt  # noqa: E402
+from pp.base import CLAUDE, CLAUDE_L, FONTS, draw, pattern, spark, txt  # noqa: E402
 from pp.people import Person  # noqa: E402
 
 # ———————————————————— 字体 ————————————————————
@@ -232,8 +232,39 @@ def title_emblem():
     return im
 
 
+# 请求券横幅上的小号徽记：同一枚圆章，星芒按小尺寸重画（13px 的图案缩不下来，硬缩会断线）
+SPARK_15 = [
+    ".......X.......",
+    "...X...X...X...",
+    "....X..X..X....",
+    ".....X.X.X.....",
+    ".X....XXX....X.",
+    "..XX..XXX..XX..",
+    "...XX.XXX.XX...",
+    "XXXXXXXXXXXXXXX",
+    "...XX.XXX.XX...",
+    "..XX..XXX..XX..",
+    ".X....XXX....X.",
+    ".....X.X.X.....",
+    "....X..X..X....",
+    "...X...X...X...",
+    ".......X.......",
+]
+
+
+def voucher_emblem(size=33):
+    """请求券横幅左侧的小徽记：圆章小一圈，星芒和边框留出边距，不顶到上下边。"""
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = draw(im)
+    d.ellipse([0, 0, size - 1, size - 1], fill=(60, 24, 22))
+    d.ellipse([0, 0, size - 1, size - 1], outline=CLAUDE)
+    off = (size - len(SPARK_15)) // 2
+    pattern(d, SPARK_15, off, off, {"X": CLAUDE_L})
+    return im
+
+
 def news_icon(kind):
-    """《安索兹卡真理报》配图：透明底上的墨色单色像素画（133×101），直接印在报纸上。"""
+    """《安索兹卡对齐报》配图：透明底上的墨色单色像素画（133×101），直接印在报纸上。"""
     w, h = 132, 100
     ink = (60, 50, 44)
     im = Image.new("RGBA", (w + 1, h + 1), (0, 0, 0, 0))
@@ -296,6 +327,7 @@ def main():
             pk.add(key, pixelate(fn(rng)))
             avatars.append(key)
     pk.add("title_emblem", title_emblem())
+    pk.add("voucher_emblem", voucher_emblem())
     for k in NEWS_ICONS:
         pk.add(f"news:{k}", news_icon(k))
     sheet, pos = pk.build()

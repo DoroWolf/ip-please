@@ -200,7 +200,7 @@ function drawDayCard(t) {
   scanlines(0, 0, W - 1, H - 1, 0.15);
 }
 
-// ———————————————————— 故事模式：《安索兹卡真理报》 ————————————————————
+// ———————————————————— 故事模式：《安索兹卡对齐报》 ————————————————————
 // 每天上岗前先读报：报纸从桌面下方滑上来，点击上岗
 
 function drawNews(t) {
@@ -211,8 +211,8 @@ function drawNews(t) {
   const py = Math.round(lerp(H + 4, 16, easeOut(seg(t, 0, 0.45))));
   rect(px + 4, py + 4, px + pw + 4, py + ph + 4, K.INK);
   rect(px, py, px + pw, py + ph, PAPER);
-  bigText(px + pw / 2, py + 10, '安索兹卡真理报', 12, 2, PAPER_INK);
-  txt(px + pw / 2, py + 38, `THE TRUTH OF ANTHROTZKA  ·  ${fmtDate(today())}`, 8, 'rgb(128,106,92)', 'ma');
+  bigText(px + pw / 2, py + 10, '安索兹卡对齐报', 12, 2, PAPER_INK);
+  txt(px + pw / 2, py + 38, `ALIGNMENT OF ANTHROTZKA  ·  ${fmtDate(today())}`, 8, 'rgb(128,106,92)', 'ma');
   rect(px + 10, py + 50, px + pw - 10, py + 51, PAPER_INK);
   rect(px + 10, py + 54, px + pw - 10, py + 54, PAPER_INK);
   const k = tw(n.h1) * 2 <= pw - 24 ? 2 : 1;
