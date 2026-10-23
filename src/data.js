@@ -239,7 +239,16 @@ const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 
 const worldDate = (diff = 1) => addDays(WORLD_DATE, diff - 1);
 
 const NAMES = ['mlee', 'k.tanaka', 'jonas.w', 'sarah_k', 'dchen', 'amelia.r', 'hiro', 'lukas88', 'nina.v', 'tomw', 'ravi.k',
-  'emma_j', 'yuki', 'felix', 'olivia.m', 'sam.t', 'mei', 'jbrown', 'anna.s', 'leo', 'grace_h', 'max.k', 'ivy', 'noah'];
+  'emma_j', 'yuki', 'felix', 'olivia.m', 'sam.t', 'mei', 'jbrown', 'anna.s', 'leo', 'grace_h', 'max.k', 'ivy', 'noah',
+  'pwang', 'aiko.s', 'minjun', 'soyeon_p', 'linh.ng', 'arjun.m', 'priya_s', 'omar.h', 'fatima.z', 'yusuf', 'aisha.b',
+  'kwame', 'chidi.o', 'zanele', 'diego.r', 'lucia_m', 'mateo', 'camila.g', 'joao.p', 'bruna_s', 'pierre.d', 'chloe.b',
+  'margaux', 'hans.k', 'greta_v', 'niklas', 'sven.l', 'astrid', 'freja.n', 'erik_j', 'marco.b', 'giulia', 'luca_r',
+  'elena.p', 'pablo_g', 'ines.f', 'tomasz.k', 'ola.w', 'jnovak', 'petra', 'dmitri', 'irina.v', 'oleg_s', 'nadia.k',
+  'ahmet.y', 'elif_d', 'noa.l', 'eitan', 'reza.m', 'leila_h', 'sanjay', 'deepa.r', 'taro_y', 'haruka', 'ren.k',
+  'sora_m', 'jiho.k', 'wei.z', 'xiaoyu', 'haoran_l', 'tuan.p', 'mai_t', 'bao.ng', 'putri.a', 'rizky', 'jose.dc',
+  'liam.o', 'aoife', 'callum_r', 'isla.m', 'owen.j', 'harper', 'mason_w', 'chloe_t', 'ethan.l', 'zoe.k', 'jack_h',
+  'ruby.c', 'kai', 'nova', 'pixel_77', 'byteme', 'neo.v', 'qwerty', 'sudo_su', 'nullptr', 'c0ffee', 'moonbeam',
+  'echo_9', 'tinkerer', 'lazycat', 'ghost42', 'zz_top', 'rainyday'];
 const CHAT_TASKS = ['总结一份季度财报', '把这段代码改写成 TypeScript', '翻译一封商务邮件', '解释一个统计学概念', '起草一份租房合同',
   '调试一段 Python 报错', '润色一封求职信', '整理会议纪要', '设计一份数据库表结构', '规划一周的旅行路线', '准备一场面试'];
 const API_TASKS = ['客服系统自动回复', '批量翻译产品说明', '代码审查流水线', '文档摘要服务', '工单分类', '日志异常分析'];

@@ -5,7 +5,7 @@
   python tools/build_assets.py
 
 - 字体图集：扫描 src/ 下所有 JS 与 index.html 里出现的字符，只渲染这些字（缝合像素字体 8/10/12px）
-- 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、默认剪影、少量自拍），统一套像素滤镜；Claude 徽标；
+- 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、马赛克、表情、星球、杯子、默认剪影、自拍），统一套像素滤镜；Claude 徽标；
   故事模式《安索兹卡对齐报》的配图
 产物是一个 JS 文件（图片以 base64 内嵌），所以 index.html 直接双击也能玩。
 """
@@ -106,9 +106,16 @@ def shade(c, k):
     return tuple(max(0, min(255, int(v * k))) for v in c)
 
 
+def av_diff(a, b):
+    """两张头像逐像素的平均色差。"""
+    pa, pb = a.tobytes(), b.tobytes()
+    return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
+
+
 def av_default(rng):
     """注册后从没改过的默认头像。"""
-    bg = rng.choice([(150, 150, 146), (176, 184, 194), (196, 190, 180)])
+    bg = rng.choice([(150, 150, 146), (176, 184, 194), (196, 190, 180), (110, 124, 150), (176, 146, 160), (130, 160, 130),
+                     (100, 100, 104), (190, 170, 120), (120, 160, 170)])
     im = Image.new("RGB", (S, S), bg)
     d = draw(im)
     fg = shade(bg, 1.28)
@@ -121,21 +128,36 @@ def av_landscape(rng):
     sky, sun, hill = rng.choice([((110, 150, 190), (236, 214, 150), (70, 100, 80)),
                                  ((200, 130, 100), (240, 200, 120), (80, 60, 70)),
                                  ((40, 50, 80), (220, 220, 200), (30, 34, 44)),
-                                 ((150, 190, 210), (250, 240, 210), (110, 120, 130))])
+                                 ((150, 190, 210), (250, 240, 210), (110, 120, 130)),
+                                 ((230, 170, 130), (250, 230, 180), (120, 80, 70)),
+                                 ((90, 70, 110), (240, 180, 120), (50, 40, 60)),
+                                 ((170, 200, 180), (250, 250, 220), (60, 110, 90))])
     im = Image.new("RGB", (S, S), sky)
     d = draw(im)
     sx = rng.randint(14, 60)
     d.ellipse([sx, 10, sx + 20, 30], fill=sun)
-    a, b = rng.randint(24, 40), rng.randint(50, 70)
-    d.polygon([(0, 70), (a, 32), (a + 22, 60), (b, 42), (88, 68), (88, 88), (0, 88)], fill=hill)
-    d.rectangle([0, 72, 88, 88], fill=shade(sky, 0.75))
+    k = rng.randrange(3)
+    if k == 0:     # 山
+        a, b = rng.randint(24, 40), rng.randint(50, 70)
+        d.polygon([(0, 70), (a, 32), (a + 22, 60), (b, 42), (88, 68), (88, 88), (0, 88)], fill=hill)
+        d.rectangle([0, 72, 88, 88], fill=shade(sky, 0.75))
+    elif k == 1:   # 海
+        d.rectangle([0, 56, 88, 88], fill=shade(hill, 1.3))
+        for y in range(62, 88, 8):
+            d.line([0, y, 88, y], fill=shade(sun, 0.9))
+    else:          # 城市天际线
+        x = 0
+        while x < S:
+            w, h = rng.randint(8, 16), rng.randint(20, 50)
+            d.rectangle([x, 88 - h, x + w - 1, 88], fill=shade(hill, rng.choice([0.8, 1.0, 1.2])))
+            x += w
     return im
 
 
 def av_pet(rng):
     """猫或狗的侧影。"""
-    bg = rng.choice([(220, 200, 170), (180, 200, 210), (200, 210, 180), (230, 190, 190)])
-    fur = rng.choice([(60, 50, 46), (200, 140, 80), (230, 226, 216), (120, 110, 104)])
+    bg = rng.choice([(220, 200, 170), (180, 200, 210), (200, 210, 180), (230, 190, 190), (200, 190, 220), (90, 100, 110)])
+    fur = rng.choice([(60, 50, 46), (200, 140, 80), (230, 226, 216), (120, 110, 104), (160, 120, 90), (220, 180, 120)])
     im = Image.new("RGB", (S, S), bg)
     d = draw(im)
     if rng.random() < 0.5:   # 猫：尖耳
@@ -155,34 +177,37 @@ def av_pet(rng):
 
 
 def av_flower(rng):
-    bg = rng.choice([(70, 110, 80), (40, 60, 70), (220, 214, 196)])
-    pet = rng.choice([(230, 120, 140), (240, 210, 90), (240, 240, 236), (170, 120, 200)])
+    bg = rng.choice([(70, 110, 80), (40, 60, 70), (220, 214, 196), (110, 90, 120), (180, 200, 220)])
+    pet = rng.choice([(230, 120, 140), (240, 210, 90), (240, 240, 236), (170, 120, 200), (230, 140, 80)])
     im = Image.new("RGB", (S, S), bg)
     d = draw(im)
+    r = rng.choice([10, 12])
     for ox, oy in ((0, -18), (0, 18), (-18, 0), (18, 0), (-13, -13), (13, 13), (-13, 13), (13, -13)):
-        d.ellipse([44 + ox - 12, 44 + oy - 12, 44 + ox + 12, 44 + oy + 12], fill=pet)
-    d.ellipse([34, 34, 54, 54], fill=(200, 150, 60))
+        d.ellipse([44 + ox - r, 44 + oy - r, 44 + ox + r, 44 + oy + r], fill=pet)
+    d.ellipse([34, 34, 54, 54], fill=rng.choice([(200, 150, 60), (120, 80, 50)]))
     return im
 
 
 def av_letter(rng):
     """系统按用户名首字母生成的头像。"""
-    bg = rng.choice([(60, 120, 180), (180, 80, 90), (90, 150, 110), (150, 100, 180), (200, 140, 60), (70, 140, 150)])
+    bg = rng.choice([(60, 120, 180), (180, 80, 90), (90, 150, 110), (150, 100, 180), (200, 140, 60), (70, 140, 150),
+                     (110, 110, 120), (190, 110, 150), (60, 80, 130), (130, 150, 60), (160, 90, 50), (40, 110, 100),
+                     (120, 70, 120), (200, 170, 70)])
     im = Image.new("RGB", (S, S), bg)
-    ch = rng.choice("ABCDEFGHJKLMNPRSTWZ")
+    ch = rng.choice("ABCDEFGHJKLMNOPRSTUVWXYZ")
     m = Image.new("L", (12, 14), 0)
     txt(draw(m), (1, 1), ch, 12, 255)
     m = m.resize((12 * 5, 14 * 5), Image.NEAREST)
-    im.paste((240, 240, 236), (14, 8), m)
+    im.paste((30, 30, 34) if sum(bg) >= 400 else (240, 240, 236), (14, 8), m)
     return im
 
 
 def av_geo(rng):
-    a = rng.choice([(40, 46, 70), (70, 40, 60), (30, 70, 70), (60, 60, 64), (90, 70, 40)])
-    b = shade(rng.choice([(90, 160, 200), (220, 120, 100), (120, 200, 140), (200, 180, 90), (180, 140, 220)]), 1)
+    a = rng.choice([(40, 46, 70), (70, 40, 60), (30, 70, 70), (60, 60, 64), (90, 70, 40), (30, 30, 34)])
+    b = rng.choice([(90, 160, 200), (220, 120, 100), (120, 200, 140), (200, 180, 90), (180, 140, 220), (230, 230, 220)])
     im = Image.new("RGB", (S, S), a)
     d = draw(im)
-    k = rng.randrange(4)
+    k = rng.randrange(6)
     if k == 0:
         for r in range(40, 0, -10):
             d.ellipse([44 - r, 44 - r, 44 + r, 44 + r], fill=b if r % 20 else a)
@@ -194,9 +219,82 @@ def av_geo(rng):
     elif k == 2:
         for i in range(-S, S, 20):
             d.polygon([(i, 0), (i + 10, 0), (i + 10 + S, S), (i + S, S)], fill=b)
-    else:
+    elif k == 3:
         d.polygon([(44, 8), (80, 44), (44, 80), (8, 44)], fill=b)
         d.polygon([(44, 26), (62, 44), (44, 62), (26, 44)], fill=a)
+    elif k == 4:   # 三角
+        d.polygon([(44, 10), (80, 74), (8, 74)], fill=b)
+    else:          # 横条
+        for y in range(0, S, 16):
+            d.rectangle([0, y, S, y + 7], fill=b)
+    return im
+
+
+def av_identicon(rng):
+    """系统按账号哈希生成的 5×5 对称马赛克。"""
+    fg = rng.choice([(90, 160, 200), (220, 120, 100), (120, 190, 110), (200, 170, 80), (170, 120, 210),
+                     (220, 110, 160), (80, 170, 170)])
+    im = Image.new("RGB", (S, S), (236, 234, 228))
+    d = draw(im)
+    for y in range(5):
+        for x in range(3):
+            if rng.random() < 0.5:
+                for xx in {x, 4 - x}:
+                    d.rectangle([4 + xx * 16, 4 + y * 16, 4 + xx * 16 + 15, 4 + y * 16 + 15], fill=fg)
+    return im
+
+
+def av_smiley(rng):
+    """表情符号。"""
+    bg = rng.choice([(70, 110, 160), (160, 70, 80), (60, 120, 90), (90, 80, 110), (220, 214, 196)])
+    face = rng.choice([(240, 200, 70), (240, 160, 70), (140, 200, 120)])
+    im = Image.new("RGB", (S, S), bg)
+    d = draw(im)
+    d.ellipse([10, 10, 78, 78], fill=face)
+    ink = (50, 36, 30)
+    k = rng.randrange(4)
+    if k == 3:     # 墨镜
+        d.rectangle([20, 32, 68, 42], fill=ink)
+    else:
+        d.ellipse([28, 30, 36, 42], fill=ink)
+        d.ellipse([52, 30, 60, 42] if k != 2 else [50, 36, 62, 39], fill=ink)   # k=2 眨眼
+    if k == 1:
+        d.line([32, 58, 56, 58], fill=ink, width=4)
+    else:
+        d.arc([24, 36, 64, 66], 20, 160, fill=ink, width=4)
+    return im
+
+
+def av_planet(rng):
+    bg = rng.choice([(20, 22, 40), (30, 20, 44), (10, 30, 40)])
+    body = rng.choice([(200, 120, 80), (110, 150, 210), (200, 180, 120), (150, 200, 160), (190, 110, 170)])
+    im = Image.new("RGB", (S, S), bg)
+    d = draw(im)
+    for _ in range(14):
+        x, y = rng.randrange(S), rng.randrange(S)
+        d.rectangle([x, y, x + 1, y + 1], fill=(220, 220, 230))
+    r = rng.randint(20, 28)
+    box = [44 - r, 44 - r, 44 + r, 44 + r]
+    d.ellipse(box, fill=body)
+    d.chord(box, 300, 120, fill=shade(body, 0.7))
+    if rng.random() < 0.6:   # 土星环：先画整圈，再用星球上半部盖住后半圈
+        d.ellipse([6, 38, 82, 52], outline=(230, 220, 190), width=3)
+        d.chord(box, 180, 360, fill=body)
+    return im
+
+
+def av_cup(rng):
+    """咖啡 / 奶茶。"""
+    bg = rng.choice([(220, 200, 170), (180, 200, 190), (200, 180, 200), (70, 80, 90), (230, 220, 200)])
+    cup = rng.choice([(240, 240, 236), (200, 80, 70), (80, 120, 170), (230, 190, 90)])
+    im = Image.new("RGB", (S, S), bg)
+    d = draw(im)
+    d.rounded_rectangle([20, 36, 62, 76], radius=6, fill=cup)
+    d.ellipse([58, 44, 76, 64], outline=cup, width=5)
+    d.rectangle([22, 36, 60, 42], fill=rng.choice([(90, 56, 40), (190, 150, 110)]))
+    for x in (30, 42, 54):
+        if rng.random() < 0.7:
+            d.arc([x - 6, 10, x + 2, 30], 270, 90, fill=shade(bg, 1.3), width=2)
     return im
 
 
@@ -207,20 +305,30 @@ def av_selfie(rng):
         skin=rng.choice(["light", "mid", "tan", "deep"]),
         face=rng.choice(["oval", "round", "long", "square"]),
         hair=hair,
-        hair_color=rng.choice([(42, 34, 31), (30, 26, 24), (80, 60, 44), (206, 176, 104), (160, 156, 150)]),
-        eyes=rng.choice([None] * 4 + ["glasses", "rimless"]),
-        top=rng.choice(["jacket", "hoodie", "polo", "tee", "shirt_tie"]),
-        top_color=rng.choice([(86, 82, 64), (52, 56, 70), (90, 96, 104), (70, 96, 96), (150, 60, 50), (80, 90, 120)]),
-        expr=rng.choice(["neutral", "smile", "smile"]),
+        hair_color=rng.choice([(42, 34, 31), (30, 26, 24), (80, 60, 44), (206, 176, 104), (160, 156, 150),
+                               (150, 70, 50), (60, 70, 110)]),
+        beard=rng.choice([None] * 6 + ["mustache", "stubble"]) if hair not in ("long", "bun") else None,
+        eyes=rng.choice([None] * 4 + ["glasses", "rimless", "sunglasses"]),
+        hat=rng.choice([None] * 6 + ["cap", "flatcap", "hood"]),
+        hat_color=rng.choice([(150, 48, 42), (52, 56, 70), (70, 96, 96), (200, 170, 80)]),
+        acc=rng.choice([None] * 8 + ["headphones"]),
+        top=rng.choice(["jacket", "hoodie", "polo", "tee", "shirt_tie", "cardigan", "plaid"]),
+        top_color=rng.choice([(86, 82, 64), (52, 56, 70), (90, 96, 104), (70, 96, 96), (150, 60, 50), (80, 90, 120),
+                              (130, 110, 150), (180, 150, 90)]),
+        expr=rng.choice(["neutral", "smile", "smile", "grin"]),
     )
     spr = p.sprite()
     src = spr.crop((90 - 46, 4, 90 + 46, 96))   # 立绘画布 180x128，人物中轴 x=90
-    flat = Image.new("RGB", src.size, rng.choice([(170, 180, 190), (200, 190, 170), (120, 140, 120), (90, 100, 120)]))
+    flat = Image.new("RGB", src.size, rng.choice([(170, 180, 190), (200, 190, 170), (120, 140, 120), (90, 100, 120),
+                                                  (190, 160, 160), (150, 170, 200)]))
     flat.paste(src, (0, 0), src)
     return flat.resize((S, S), Image.BOX)
 
 
-KINDS = [(av_default, 6), (av_landscape, 6), (av_pet, 6), (av_flower, 4), (av_letter, 6), (av_geo, 6), (av_selfie, 6)]
+KINDS = [(av_default, 6), (av_landscape, 12), (av_pet, 12), (av_flower, 8), (av_letter, 12), (av_geo, 12),
+         (av_identicon, 10), (av_smiley, 6), (av_planet, 6), (av_cup, 6), (av_selfie, 20)]
+# 两张头像平均色差低于这个值就算撞脸、重抽：否则“头像不符”可能换上一张肉眼分不出的
+MIN_DIFF = 14
 
 
 def title_emblem():
@@ -321,10 +429,18 @@ def main():
     rng = random.Random(417)
     pk = Packer()
     avatars = []
+    picked = []
     for fn, n in KINDS:
         for i in range(n):
             key = f"av:{fn.__name__[3:]}{i}"
-            pk.add(key, pixelate(fn(rng)))
+            for _ in range(200):
+                im = pixelate(fn(rng))
+                if all(av_diff(im, o) >= MIN_DIFF for o in picked):
+                    break
+            else:
+                raise SystemExit(f"{key}: 重抽 200 次都和已有头像太像，调一下画法或 MIN_DIFF")
+            picked.append(im)
+            pk.add(key, im)
             avatars.append(key)
     pk.add("title_emblem", title_emblem())
     pk.add("voucher_emblem", voucher_emblem())
