@@ -68,9 +68,9 @@ const SIGNERS = {
   api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
 };
 const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '请求券', return: '临时返回页', env: '环境信息卡', ent: '企业授权' };
-// 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、身份矛盾（头像 / IP / 昵称 / 企业授权的账号）、
-// 证件过期、特别关注对象，以及令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符
-const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale', 'isp', 'ent_acct'];
+// 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
+// 身份矛盾（头像 / IP / 昵称 / 企业授权的账号）、证件过期、特别关注对象，以及令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符
+const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake'];
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
 // 审查出这些问题后拘留按钮亮起（issue.type）：除了上面的问题，还有 SMS 验证里查出的矛盾
 const SUSPEND_ISSUES = SUSPEND_FLAWS.concat(['phone', 'oldname']);
@@ -88,24 +88,25 @@ const PHONE_CC = {
 // 企业账户只出示凭证和企业授权；「授权企业」里有 Anthrotzka 才能放行，且不受地区限制。
 // 凭证地区一定是签发企业的所在地区（不出这类错，免得玩家困惑）。
 // icon：11×11 的像素图标（字符 → 颜色），企业授权的横幅和手册的企业名录共用
+// fakes：伪造企业授权（ent_fake）横幅上印的山寨名称，乍一看差不多。DeepThink 的授权一律无效，不会被伪造
 const CORPS = [
-  { key: 'openmind', name: 'OpenMind', region: '美国', icon: {
+  { key: 'openmind', name: 'OpenMind', region: '美国', fakes: ['OpenMlnd', '0penMind', 'OpenMind.'], icon: {
     pat: ['....WWW....', '..WWW.WWW..', '.WW.....WW.', '.W..WWW..W.', 'WW.W...W.WW', 'W..W...W..W',
       'WW.W...W.WW', '.W..WWW..W.', '.WW.....WW.', '..WWW.WWW..', '....WWW....'],
     cols: { W: [230, 240, 236] } } },
-  { key: 'anthrotzka', name: 'Anthrotzka', region: '美国', icon: {
+  { key: 'anthrotzka', name: 'Anthrotzka', region: '美国', fakes: ['Anthrotska', 'Antrhotzka', 'AnthroTzka'], icon: {
     pat: ['.....A.....', '.A...A...A.', '..A..A..A..', '...A.A.A...', '....AAA....', 'AAAAAAAAAAA',
       '....AAA....', '...A.A.A...', '..A..A..A..', '.A...A...A.', '.....A.....'],
     cols: { A: [232, 156, 116] } } },
-  { key: 'googol', name: 'Googol', region: '美国', icon: {
+  { key: 'googol', name: 'Googol', region: '美国', fakes: ['Gooqol', 'Googo1', 'Goggol'], icon: {
     pat: ['...RRRRR...', '.RRRRRRRRR.', 'RRR.....RR.', 'YY.........', 'YY.........', 'YY...BBBBBB',
       'YY...BBBBBB', 'GG.......BB', 'GGG.....BB.', '.GGGGGGGBB.', '...GGGGG...'],
     cols: { R: [234, 80, 64], Y: [250, 190, 40], G: [60, 176, 90], B: [70, 130, 240] } } },
-  { key: 'yai', name: 'yAI', region: '美国', icon: {
+  { key: 'yai', name: 'yAI', region: '美国', fakes: ['yA1', 'vAI', 'yAl'], icon: {
     pat: ['WW.......WW', '.WW.....WW.', '..WW...WW..', '...WW.WW...', '....WWW....', '....WW.....',
       '...WW......', '..WW.......', '.WW........', 'WW.........', 'W..........'],
     cols: { W: [230, 240, 236] } } },
-  { key: 'mistrain', name: 'Mistrain', region: '法国', icon: {
+  { key: 'mistrain', name: 'Mistrain', region: '法国', fakes: ['Mistrian', 'Mlstrain', 'Mistrains'], icon: {
     pat: ['...........', '11......11.', '11......11.', '2222..2222.', '2222..2222.', '3333333333.',
       '3333333333.', '44..44..44.', '44..44..44.', '55......55.', '55......55.'],
     cols: { 1: [255, 216, 0], 2: [255, 175, 0], 3: [255, 130, 5], 4: [250, 80, 15], 5: [225, 30, 10] } } },
@@ -116,6 +117,25 @@ const CORPS = [
 ];
 const HOST_CORP = 'Anthrotzka';
 const corpOf = (key) => CORPS.find((c) => c.key === key);
+
+// 伪造的企业授权：横幅上的企业名称或图标与企业名录不符；返回 [横幅 {name, icon}, 说明]。
+// 假图标在原图标上改 4 个像素：抹掉一个有色像素，或在有色像素旁边补一个同色像素
+function forgedCorp(c) {
+  if (Math.random() < 0.5) return [{ name: pick(c.fakes), icon: c.icon }, '企业名称与企业名录不符'];
+  const pat = c.icon.pat.map((r) => [...r]);
+  const at = (y, x) => (pat[y] && pat[y][x]) || '.';
+  const done = new Set();
+  for (let tries = 0; done.size < 4 && tries < 200; tries++) {
+    const y = rint(0, 10), x = rint(0, 10);
+    if (done.has(y * 11 + x)) continue;
+    const near = [at(y - 1, x), at(y + 1, x), at(y, x - 1), at(y, x + 1)].filter((ch) => ch !== '.');
+    if (pat[y][x] !== '.') pat[y][x] = '.';
+    else if (near.length) pat[y][x] = pick(near);
+    else continue;
+    done.add(y * 11 + x);
+  }
+  return [{ name: c.name, icon: { pat: pat.map((r) => r.join('')), cols: c.icon.cols } }, '企业图标与企业名录不符'];
+}
 
 // 环境信息卡（无尽模式难度 2）：登记请求设备上有、但 HTTP 请求本身带不出来的环境信息。
 // 时区须与凭证地区一致；系统 / 屏幕只是设备档案，不参与核对
@@ -294,6 +314,7 @@ const QUESTIONS = {
   locale: '证件上的语言 / 时区与你的凭证地区不一致。',
   isp: '令牌上的运营商不在你的凭证地区。',
   no_env: '你没有出示环境信息卡。', ent_auth: `你的企业授权没有写 ${HOST_CORP}。`, ent_acct: '企业授权上的账号对不上。',
+  ent_fake: '你的企业授权是伪造的。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -316,6 +337,7 @@ const EXCUSES = {
   no_env: ['我不知道要这个。', '浏览器没让我生成。', '以前不需要这个。'],
   ent_auth: ['公司说已经签约了。', '授权还在续签中。', '我们是合作伙伴啊。'],
   ent_acct: ['那是同事的账号。', '公司统一分配的。', '……我借来用一下。'],
+  ent_fake: ['公司发给我的就是这个。', '那是新版的标志。', '……网上办的。'],
 };
 
 // ———————————————— 生成请求 ————————————————
@@ -354,16 +376,17 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   if (rs.env) kinds.push('no_env');
   // 企业账户只出示凭证和企业授权：只出凭证本身（头像 / IP / 过期 / 签名）和企业授权上的问题。
   // 昵称不符留给普通请求（企业授权的账号不符另算 ent_acct），免得和 SMS 验证搅在一起
-  if (ent) kinds = kinds.filter((k) => ['photo', 'ip', 'exp', 'sig'].includes(k)).concat(['ent_auth', 'ent_auth', 'ent_acct']);
+  if (ent) kinds = kinds.filter((k) => ['photo', 'ip', 'exp', 'sig'].includes(k)).concat(['ent_auth', 'ent_auth', 'ent_acct', 'ent_fake']);
   let flaw = wanted.length && Math.random() < P_WANTED ? 'wanted' : kinds.length && Math.random() < pBad ? pick(kinds) : null;
   // 请求券：只有本国（美国 / 英国）请求不需要。支持地区内的其他国家（如日本 / 德国 / 新加坡 / 法国 / 澳大利亚 / 加拿大）算外国请求；
   // 凭证地区不在支持地区是 region 问题，有券也不能放行，所以不会生成请求券
   const foreign = !ent && !!rs.voucher && flaw !== 'region' && foreignRegions.length > 0
     && (flaw === 'no_voucher' || Math.random() < (rs.foreign || 0));
   // 签发企业：DeepThink 的企业授权必定不含 Anthrotzka（一律无效）；ent_auth 也不由 Anthrotzka 签发。
-  // 特别关注对象不落在 DeepThink，免得一单同时有「无效授权」和「可拘留」两种处置。
+  // 特别关注对象、伪造授权不落在 DeepThink，免得一单同时有「无效授权」和「可拘留」两种处置。
   const corp = ent
-    ? pick(CORPS.filter((c) => (flaw === 'ent_auth' ? c.name !== HOST_CORP : flaw === 'wanted' ? c.key !== 'deepthink' : true)))
+    ? pick(CORPS.filter((c) => (flaw === 'ent_auth' ? c.name !== HOST_CORP
+      : flaw === 'wanted' || flaw === 'ent_fake' ? c.key !== 'deepthink' : true)))
     : null;
   if (corp && corp.key === 'deepthink') flaw = 'ent_auth';
   // 身份不符：冒用（flaw）或本人换过头像 / 改过昵称（合规，验证 SMS 可以确认）；要在确定最终 flaw 之后再定
@@ -449,6 +472,12 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     entDoc.账号 = nameVariant(handle);
     issue([['ent.账号', 'cred.昵称'], ['ent.账号', 'rv.昵称']], '账号不符', `本人 ${handle}   VS   企业授权 ${entDoc.账号}`);
     spec.reason = '企业授权上的账号与本人不符';
+  } else if (flaw === 'ent_fake') {
+    // 横幅上的企业名称或图标是山寨的：拿横幅和手册的企业名录比对；授权企业一栏照常写着 Anthrotzka
+    const [banner, sub] = forgedCorp(corp);
+    entDoc.banner = banner;
+    issue([['ent.企业', 'book.ent']], '企业授权伪造', sub);
+    spec.reason = `企业授权是伪造的（${sub}）`;
   } else if (flaw === 'no_voucher') {
     // 凭证地区在支持地区内（非本国）才需要请求券；柜台上没有券也可以直接拿柜台和条例审查
     issue([['cred.地区', 'rule.voucher'], ['rv.柜台', 'rule.voucher']], '缺少请求券', `请求来自${cred.地区}，未出示请求券`);
@@ -683,6 +712,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   if (docs.ent) {
     const d = new Doc('ent', [['账号', docs.ent.账号], ['IP', docs.ent.IP], ['授权企业', docs.ent.授权企业, true]], null);
     d.corp = corp.key;
+    if (docs.ent.banner) d.fake = docs.ent.banner;
     spec.docs.push(d);
   }
   return spec;

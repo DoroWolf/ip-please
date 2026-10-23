@@ -7,12 +7,11 @@ const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher:
 const BANNER_H = 46;   // 请求券顶部的欢迎横幅：标题页那枚 Claude 徽记的小号版 + 「欢迎使用 Claude」装饰字样
 const ENT_BANNER_H = 30;   // 企业授权顶部的横幅：签发企业的图标（2 倍）+ 企业名称
 
-// 企业图标（data.js 的 CORPS）：k 倍像素画；颜色表转成 CSS 后缓存
+// 企业图标（data.js 的 CORPS）：k 倍像素画；颜色表转成 CSS 后缓存。icon 默认是企业名录上的图标（伪造授权会传入假图标）
 const corpCols = new Map();
-function drawCorpIcon(x, y, key, k = 1) {
-  const c = corpOf(key);
-  if (!corpCols.has(key)) corpCols.set(key, Object.fromEntries(Object.entries(c.icon.cols).map(([ch, v]) => [ch, rgb(v)])));
-  pattern(c.icon.pat, x, y, corpCols.get(key), k);
+function drawCorpIcon(x, y, key, k = 1, icon = corpOf(key).icon) {
+  if (!corpCols.has(key)) corpCols.set(key, Object.fromEntries(Object.entries(corpOf(key).icon.cols).map(([ch, v]) => [ch, rgb(v)])));
+  pattern(icon.pat, x, y, corpCols.get(key), k);
 }
 const SIGNER_COL = { cred: C.AMBER, api: C.GREEN };
 // 标题栏右端的按钮（窗口内相对坐标）：应用（手册 / 通告 / 历史记录）有关闭钮，证件和通知只能最小化
@@ -115,13 +114,14 @@ class Doc {
     txt(x0 + 48, y0 + 22, 'Claude', 12, K.WHITE);
   }
 
-  // 企业授权的横幅：签发企业的图标（2 倍）+ 企业名称
+  // 企业授权的横幅：签发企业的图标（2 倍）+ 企业名称；伪造的授权（this.fake）印山寨的名称或图标
   drawEntBanner(x, y) {
+    const c = this.fake || corpOf(this.corp);
     const x0 = x + 4, x1 = x + this.w - 5, y0 = y + TITLE_H + 2, y1 = y0 + ENT_BANNER_H - 3;
     rect(x0, y0, x1, y1, K.INK);
     outline(x0, y0, x1, y1, K.LINE_L);
-    drawCorpIcon(x0 + 3, y0 + 2, this.corp, 2);
-    txt(x0 + 32, y0 + 3, corpOf(this.corp).name, 12, K.WHITE);
+    drawCorpIcon(x0 + 3, y0 + 2, this.corp, 2, c.icon);
+    txt(x0 + 32, y0 + 3, c.name, 12, K.WHITE);
     txt(x0 + 32, y0 + 17, '企业账户授权', 8, K.DIM);
   }
 

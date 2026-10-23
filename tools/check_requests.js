@@ -561,11 +561,11 @@ for (const c of CORPS) {
 for (let i = 0; i < 3000; i++) {
   const spec = makeRequest(day(1), 0.6, [], FULL_RULES);
   if (spec.ent || spec.docs.some((d) => d.key === 'env' || d.key === 'ent')) fail('難度 1 不應出環境信息卡或企業授權', spec);
-  if (['no_env', 'ent_auth', 'ent_acct'].includes(spec.flaw)) fail('難度 1 不應出難度 2 的問題', spec);
+  if (['no_env', 'ent_auth', 'ent_acct', 'ent_fake'].includes(spec.flaw)) fail('難度 1 不應出難度 2 的問題', spec);
 }
 {
-  const ENT_FLAWS = [null, 'wanted', 'photo', 'ip', 'exp', 'sig', 'ent_auth', 'ent_acct'];
-  const seen = { ent: 0, env: 0, noEnv: 0, envTz: 0, entAuth: 0, entAcct: 0, deep: 0, entIp: 0 };
+  const ENT_FLAWS = [null, 'wanted', 'photo', 'ip', 'exp', 'sig', 'ent_auth', 'ent_acct', 'ent_fake'];
+  const seen = { ent: 0, env: 0, noEnv: 0, envTz: 0, entAuth: 0, entAcct: 0, entFakeName: 0, entFakeIcon: 0, deep: 0, entIp: 0 };
   const wantedAv = get('ASSETS').avatars.slice(0, 3);
   for (let i = 0; i < 40000; i++) {
     const spec = makeRequest(day(1), 0.5, wantedAv, FULL_RULES_2);
@@ -627,6 +627,23 @@ for (let i = 0; i < 3000; i++) {
         if (!issuesOf(spec, 'ent.账号', 'cred.昵称').length || !issuesOf(spec, 'ent.账号', 'rv.昵称').length) fail('ent_acct 缺少矛盾', spec);
       } else if (rows.账号 !== spec.handle) fail('企業授權帳號應是本人', spec);
       if (spec.flaw === 'ip' && rows.IP !== spec.ip) seen.entIp++;
+      // 伪造的企業授權：橫幅上的名稱或圖示（恰好一項）與企業名錄不符，拿橫幅對企業名錄可查出；其餘照常有效
+      const fakeIssue = issuesOf(spec, 'ent.企业', 'book.ent');
+      if (spec.flaw === 'ent_fake') {
+        if (!ent.fake || !fakeIssue.length) fail('ent_fake 缺少假橫幅或矛盾', spec);
+        if (corp.key === 'deepthink') fail('DeepThink 不應出 ent_fake', spec);
+        const badName = ent.fake.name !== corp.name, badIcon = ent.fake.icon.pat.join() !== corp.icon.pat.join();
+        if (badName === badIcon) fail('ent_fake 應恰好偽造名稱或圖示其中一項', spec);
+        if (badName) {
+          seen.entFakeName++;
+          if (CORPS.some((c) => c.name === ent.fake.name)) fail('偽造的企業名稱不應是名錄上的企業', spec);
+        } else {
+          seen.entFakeIcon++;
+          const diff = ent.fake.icon.pat.join('').split('').filter((ch, j) => ch !== corp.icon.pat.join('')[j]).length;
+          if (diff !== 4) fail(`偽造圖示應改 4 個像素：${diff}`, spec);
+          if (ent.fake.icon.pat.some((r) => [...r].some((ch) => ch !== '.' && !corp.icon.cols[ch]))) fail('偽造圖示有沒定義顏色的像素', spec);
+        }
+      } else if (ent.fake || fakeIssue.length) fail('非 ent_fake 不應有假橫幅', spec);
       continue;
     }
     // 一般請求：令牌 + 環境信息卡
@@ -656,7 +673,7 @@ for (let i = 0; i < 3000; i++) {
     } else if (env.时区 !== REGION_LOCALE[region][1]) fail('合規的環境信息卡時區應與憑證地區一致', spec);
   }
   for (const [k, v] of Object.entries(seen)) if (!v) fail(`難度 2 應會出現：${k}`, {});
-  if (!SUSPEND_FLAWS.includes('ent_acct') || SUSPEND_FLAWS.includes('ent_auth') || SUSPEND_FLAWS.includes('no_env')) fail('難度 2 的拘留範圍錯', {});
+  if (!SUSPEND_FLAWS.includes('ent_acct') || !SUSPEND_FLAWS.includes('ent_fake') || SUSPEND_FLAWS.includes('ent_auth') || SUSPEND_FLAWS.includes('no_env')) fail('難度 2 的拘留範圍錯', {});
   stats.diff2 = seen;
 }
 // 難度 2 的手冊：條例寫回「語言和時區」、支持地區列出時區、多一章企業名錄（含六家企業與圖示）
@@ -689,7 +706,7 @@ for (let i = 0; i < 3000; i++) {
   // 其他證件的值欄位置不變
   if (new Doc('tok', [['运营商', '纽约 · ANTHROTZKA']], null).kx !== 34) fail('令牌值欄位置不應改變', {});
 }
-for (const ch of '环境信息卡企业授权账号名录所在地区难度新增×') {
+for (const ch of '环境信息卡企业授权账号名录所在地区难度新增×伪造图标名称标志新版') {
   for (const s of [8, 10, 12]) if (!get('ASSETS').font[s][ch]) fail(`缺少字形（${s}px）：${ch}`, {});
 }
 
