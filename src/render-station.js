@@ -132,7 +132,10 @@ function drawReview() {
   // 接入者信息
   const ready = avatarReady(e);
   const s = e && e.spec;
-  [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && s.typeLabel]].forEach(([k, v], i) => {
+  const info = [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && s.typeLabel]];
+  // 难度 2：本次请求的使用设备 / 请求流量（对照环境信息卡）
+  if (rules().env) info.push(['设备', s && s.device], ['流量', s && s.flow]);
+  info.forEach(([k, v], i) => {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
     txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? K.TEXT : K.DIM_D);
   });
@@ -147,14 +150,18 @@ function drawReview() {
     wrap(ln.text, 10, x1 - x0 - 24).slice(0, 1).forEach((t) => txt(x0 + 12, y + 10, t, 10, i === lines.length - 1 ? K.WHITE : K.DIM));
   });
   rect(x0 + 8, 316, x1 - 8, 316, K.LINE);
-  // 柜台：下一位 / 验证SMS / 拘留共用一个按钮。措施要先询问异常才解锁，按下后锁定
+  // 柜台：下一位 / 验证SMS / 请求嗅探 / 拘留共用一个按钮（优先序同左）。措施要先询问异常才解锁，按下后锁定
   const canCall = !e && !D.closing && !D.over && !D.ended;
-  const smsOk = canSmsNow(e), suspendOk = canSuspendNow(e);
-  if (measureArmed(e) && (smsOk || suspendOk)) {
+  const smsOk = canSmsNow(e), sniffOk = canSniffNow(e), suspendOk = canSuspendNow(e);
+  if (measureArmed(e) && (smsOk || sniffOk || suspendOk)) {
     if (smsOk) button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, hot: Math.floor(now * 2) % 2 === 0 });
+    else if (sniffOk) button(NEXT_BTN, '请求嗅探', K.GREEN, { size: 8, hot: Math.floor(now * 2) % 2 === 0 });
     else button(NEXT_BTN, '拘留', K.RED, { hot: Math.floor(now * 3) % 2 === 0 });
-  } else if (e && !e.leaving && (e.measureUsed || smsOk || suspendOk)) {
-    if (e.measureUsed || smsOk) button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, off: true });
+  } else if (e && !e.leaving && (e.measureUsed || smsOk || sniffOk || suspendOk)) {
+    // 锁定时显示上次按下的措施；还没按过就显示待解锁的那一个
+    const used = e.measureUsed || (smsOk ? 'sms' : sniffOk ? 'sniff' : 'suspend');
+    if (used === 'sms') button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, off: true });
+    else if (used === 'sniff') button(NEXT_BTN, '请求嗅探', K.GREEN, { size: 8, off: true });
     else button(NEXT_BTN, '拘留', K.RED, { off: true });
   } else button(NEXT_BTN, '下一位', K.CYAN, { off: !canCall, hot: canCall && !D.hinted.next && Math.floor(now * 2) % 2 === 0 });
   // 柜台上的证件：多了就左右滚动；绘制裁在柜台内，左右边缘放滚动箭头
@@ -268,7 +275,7 @@ function drawAppIcons() {
 }
 
 // 任务栏：每个桌面窗口一个按钮（色块 + 名字）
-const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN, smsf: C.GREEN, sms: C.GREEN };
+const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN, smsf: C.GREEN, sms: C.GREEN, sniff: C.GREEN };
 // 任务栏右下角的日期：故事模式再加班次时间；审查模式只圈日期本身，不圈后面显示用的时间
 function dateBox() {
   const date = fmtDate(today());

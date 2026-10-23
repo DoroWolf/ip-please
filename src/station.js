@@ -23,13 +23,15 @@ const INSPECT_ICON = APP_BOX.insp;
 // 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拒绝 栏即做出决定
 const TRAY_W = 72, TRAY_BOX = [W - TRAY_W, 154, W - 1, 270], TRAY_HOT = [W - 10, 119, W - 1, 343];
 const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W - 6, 264] };
-const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 拘留共用
+const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 请求嗅探 / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
 // 审查窗里的可审查栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在令牌上（tok.请求）。
 const RV_FIELDS = {
   'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
 };
+// 有环境信息卡的规则组（难度 2）多两栏：本次请求的使用设备 / 请求流量，对照卡上的常用设备 / 平均流量
+const RV_ENV_FIELDS = { 'rv.设备': [RV_X - 3, 172, 209, 183], 'rv.流量': [RV_X - 3, 184, 209, 195] };
 // 柜台：审查窗下方放证件的一排（按钮右边）。没有证件时，拿空柜台和条例审查
 const COUNTER_BOX = [76, 318, 205, 356];
 // 柜台上的证件图标：从柜台左边开始排；放不下时整排左右滚动（指针贴在柜台左右边缘时自动滚）
@@ -82,7 +84,7 @@ const MODES = {
 const DIFFS = [
   { name: '难度 1', desc: '证件：凭证、令牌、API 授权' },
   {
-    name: '难度 2', desc: '新增证件：环境信息卡、企业授权'},
+    name: '难度 2', desc: '新增证件与条例：环境信息卡、企业授权、禁止爬虫 / 自动化脚本'},
 ];
 const TIMED_LEN = 600, DAY_LEN = 120, DAY_LEN_LATE = 180, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
 const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
@@ -232,12 +234,13 @@ function layoutIcons() {
 }
 
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
-// 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到审查出新的异常并重新询问
+// 验证 SMS、请求嗅探和拘留都是「措施」：先询问异常解锁；按下后锁定，直到审查出新的异常并重新询问
 const canSmsNow = (e) => !!e && !!e.canSms && !e.smsSent && !e.leaving;
+const canSniffNow = (e) => !!e && !!e.canSniff && !e.sniffed && !e.leaving;
 // 拘留必须有红队 clawd 在场：没有红队的天数不显示拘留按钮，也不能拘留（只能拒绝）
 const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving && !!rules().redTeam;
 const measureArmed = (e) => !!e && !!e.measureReady && !e.leaving;
-const measureAvailable = (e) => canSmsNow(e) || canSuspendNow(e);
+const measureAvailable = (e) => canSmsNow(e) || canSniffNow(e) || canSuspendNow(e);
 
 // 能盖章的证件：凭证；凭证缺失且询问过之后，由系统派发的临时返回页（只能凭票返回，不能代替凭证放行）
 const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return');
@@ -275,7 +278,7 @@ function decide(kind) {
 function finishRequest(e) {
   if (e.decided && !e.judged) { e.judged = true; judge(e, e.decided); }
   e.leaving = true; e.tLeave = now;
-  D.wins = D.wins.filter((w) => w.kind !== 'smsf' && w.kind !== 'sms');   // SMS 表单和档案跟着这一单收走
+  D.wins = D.wins.filter((w) => w.kind !== 'smsf' && w.kind !== 'sms' && w.kind !== 'sniff');   // SMS 表单、档案和嗅探报告跟着这一单收走
   if (e.decided === 'suspend') D.arrest = { t0: now };   // 拘留：左上的红队 clawd 把请求押走，不走分流口
   else D.flows.push({ t0: now, kind: e.decided });
   setInspect(false);
@@ -283,7 +286,9 @@ function finishRequest(e) {
   later(e.decided === 'suspend' ? 1.4 : 0.6, () => { if (D.ent === e) D.ent = null; });
 }
 
-// 拘留：审查出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。切断连接，桌面上和柜台上的证件全部清掉，直接判定
+// 拘留：审查出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。
+// 头像 / 昵称 / 企业授权账号 / 使用设备这几种身份矛盾要先『验证 SMS』（按钮优先显示验证SMS），确认冒用后才轮到这里。
+// 切断连接，桌面上和柜台上的证件全部清掉，直接判定
 function suspend() {
   const e = D.ent;
   if (!canSuspendNow(e) || RUN.fail) return;
@@ -299,6 +304,13 @@ function suspend() {
   SFX.play('siren_short', 0.5);
   finishRequest(e);
 }
+
+// 合规但看着可疑的请求被拒绝 / 拘留时，处分单上的说明
+const LEGIT_LINES = {
+  photo: '本人换过头像，可经 SMS 验证确认', name: '本人改过昵称，可经 SMS 验证确认',
+  ent_acct: '本人换过企业账号，可经 SMS 验证确认',
+  device: '本人换了设备，可经 SMS 验证确认', traffic: '流量来自正常进程，可经请求嗅探确认',
+};
 
 function judge(e, kind) {
   const spec = e.spec;
@@ -329,7 +341,7 @@ function judge(e, kind) {
   const cite = citationLines(RUN.cites);
   const lines = kind === 'approve'
     ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
-    : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? `本人${spec.legit === 'photo' ? '换过头像' : '改过昵称'}，可经 SMS 验证确认` : '证件齐全，信息一致'];
+    : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? LEGIT_LINES[spec.legit] : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
     notice('处分通知', lines.concat(cite));

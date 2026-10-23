@@ -13,7 +13,7 @@ const STORY = [
   // 凭证从第一天起就带安全部会话中心的数字签名，通告第 1 页也印同一组签名；
   // 但签名详情页（seals）与「签名造假」的题（flaws 里的 'sig'）留到之后的日子
   {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '仅限美国和英国地区访问' }],
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '仅限美国和英国地区访问' }],
     continents: [['北美洲', ['美国']], ['欧洲', ['英国']]], seals: false, regions: ['美国', '美国', '英国'], tok: false, kinds: ['chat'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region'], legit: 0, wanted: false, redTeam: false,
     inspect: false,
@@ -29,7 +29,7 @@ const STORY = [
   },
   // 第二天：条例换成「地区 + 有效期」，桌面开放『审查』；凭证仍是唯一证件，请求都是对话
   {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'date', head: '所有证件须为当前有效' }],
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'date', head: '所有证件须为当前有效' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp'], legit: 0, wanted: false, redTeam: false,
     inspect: true,
@@ -51,7 +51,7 @@ const STORY = [
   // 第三天：第二天的请求堵塞事故后，外国请求（美国、英国以外的支持地区）改持「请求券」——券上只有有效期；
   // 无券或逾期才拦，凭证地区不在支持地区的请求仍按「地区不支持」直接拒绝
   {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'voucher', head: '外国请求须持有效请求券' }, { key: 'date', head: '所有证件须为当前有效' }],
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'voucher', head: '外国请求须持有效请求券' }, { key: 'date', head: '所有证件须为当前有效' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp', 'no_voucher'], legit: 0, wanted: false,
     redTeam: false, redGuards: true, inspect: true, voucher: true, foreign: 0.5,
@@ -73,7 +73,7 @@ const STORY = [
   // 第四天：请求券作废，改用安全部会话中心签发的「令牌」——登记 IP、运营商、签发日期、有效期与请求摘要，
   // 没有语言、时区，也没有签名（凭证本身仍带签名）。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
   {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证和令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '所有证件须为当前有效' }, { key: 'match', head: '证件上的 IP 须与本人一致' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
     tokRows: ['IP', '运营商', '签发', '有效期'],
@@ -91,7 +91,7 @@ const STORY = [
   },
   // 第五天：拘留权限开放。左上的红队 clawd 进驻，审查出 IP 不符 / 证件过期 / 签发日期在未来（伪造证件）后可以拘留
   {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证和令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '所有证件须为当前有效' }, { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
       { key: 'match', head: '证件上的 IP 须与本人一致' }],
     continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],

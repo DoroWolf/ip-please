@@ -149,6 +149,7 @@ function deskDown(x, y) {
   if (inBox(x, y, NEXT_BTN)) {
     if (measureArmed(e)) {
       if (canSmsNow(e)) return smsOpen();
+      if (canSniffNow(e)) return sniffOpen();
       if (canSuspendNow(e)) return suspend();
     }
     if (measureAvailable(e)) {

@@ -1,5 +1,5 @@
 'use strict';
-// 审查模式与验证 SMS：可选栏位、矛盾判定、询问、SMS 表单与身份记录。
+// 审查模式、验证 SMS 与请求嗅探：可选栏位、矛盾判定、询问、SMS 表单与身份记录、嗅探报告。
 // 依赖 station.js 的 D / RUN、desk.js 的窗口函数；绘制在 render-station.js。
 
 // ———————————————————— 审查模式 ————————————————————
@@ -24,6 +24,7 @@ function fieldBoxes() {
   if (avatarReady(D.ent)) {
     out.push({ key: 'rv.头像', box: AVATAR_BOX, w: null });
     for (const [key, box] of Object.entries(RV_FIELDS)) out.push({ key, box, w: null });
+    if (rules().env) for (const [key, box] of Object.entries(RV_ENV_FIELDS)) out.push({ key, box, w: null });
     out.push({ key: 'rv.柜台', box: COUNTER_BOX, w: null });
   }
   return out;
@@ -45,8 +46,9 @@ function compareOutcome(e, keys) {
   if (issue) return { ok: true, kind: 'bad', issue, title: issue.title, sub: issue.sub };
   const note = e && e.spec.notes && e.spec.notes.get(keys);
   if (note) return { ok: false, kind: 'ok', title: note.title, sub: note.sub };
-  if (e && e.spec.confirms.has(keys)) return { ok: false, kind: 'ok', title: '身份已确认', sub: '与身份记录一致：确为本人' };
-  if (e && e.spec.checks && e.spec.checks.has(keys)) return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
+  if (e && ((e.spec.checks && e.spec.checks.has(keys)) || e.spec.confirms.has(keys))) {
+    return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
+  }
   return { ok: false, kind: 'none', title: '无关联', sub: '这两项信息之间没有可核对的关系' };
 }
 
@@ -68,6 +70,7 @@ function inspectClick(x, y) {
   if (res.kind !== 'bad') return;
   const t = res.issue.type;
   if (SMS_ISSUES.includes(t) && !e.canSms) { e.canSms = true; toast('身份存疑：先点『询问』，再验证 SMS', K.GREEN); }
+  if (SNIFF_ISSUES.includes(t) && !e.canSniff) { e.canSniff = true; toast('流量异常：先点『询问』，再请求嗅探', K.GREEN); }
   if (SUSPEND_ISSUES.includes(t) && rules().redTeam && !e.canSuspend) {
     e.canSuspend = true;
     if (!SMS_ISSUES.includes(t)) toast('可以拘留：先点『询问』，再按『拘留』', K.RED);
@@ -93,7 +96,7 @@ function smsOpen() {
   if (!e || e.leaving) return;
   if (e.smsSent) { toast('已经发过验证 SMS 了', K.AMBER); return; }
   if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
-  e.measureUsed = true;   // 措施按下后锁定，直到审查出新的异常并重新询问
+  e.measureUsed = 'sms';   // 措施按下后锁定，直到审查出新的异常并重新询问（记下按的是哪个，按钮锁定时照样显示）
   e.measureReady = false;
   const w = D.wins.find((o) => o.kind === 'smsf');
   if (w) { raise(w); return; }
@@ -122,9 +125,35 @@ function smsSend(w) {
     if (D.ent !== e || e.leaving) return;
     const rec = new InfoWin('sms', '身份记录', 'RECORD',
       [['昵称', e.spec.handle, true], ['曾用名', s.names.length ? s.names.join('、') : '无', true], ['手机', s.phone, true]],
-      '用户的手机与使用的昵称/曾用名必须符合本记录');
+      '用户的手机与使用的昵称 / 曾用名必须符合本记录');
     addWin(rec, 'sms', ...clampDesk(250, 214, rec));
     SFX.play('intercom', 0.6);
     toast('身份记录已打印：核对手机号或曾用名', K.GREEN);
+  });
+}
+
+// ———————————————————— 请求嗅探 ————————————————————
+// 点『请求嗅探』：对方的流量被抓下来（等待 3-5 秒），桌面上打印嗅探报告（请求流量、前台 / 后台进程）。
+// 拿后台进程和手册条例「不得运行爬虫或自动化脚本」比对：云盘同步 / 视频通话等常见进程应放行；
+// 认不得的奇怪进程就是特殊进程，审查出「发现特殊进程」，询问后可以拘留
+
+function sniffOpen() {
+  const e = D.ent;
+  if (!e || e.leaving) return;
+  if (e.sniffed) { toast('已经嗅探过了', K.AMBER); return; }
+  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  e.sniffed = true;
+  e.measureUsed = 'sniff';
+  e.measureReady = false;
+  SFX.play('select', 0.6);
+  say('C', '请保持连接，正在嗅探你的请求。');
+  const s = e.spec.sniff;
+  later(rint(3, 5), () => {
+    if (D.ent !== e || e.leaving) return;
+    const rep = new InfoWin('sniff', '嗅探报告', 'SNIFF',
+      [['请求流量', s.flow, true], ['前台进程', s.fg], ['后台进程', s.bg, true]]);
+    addWin(rep, 'sniff', ...clampDesk(250, 190, rep));
+    SFX.play('intercom', 0.6);
+    toast('嗅探报告已打印：对照条例核对后台进程', K.GREEN);
   });
 }
