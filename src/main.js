@@ -14,12 +14,12 @@ function go(name) {
   if (name === 'desk') startShift();
 }
 
-// 黑屏转场：先压黑，再切场景
+// 黑屏转场：先压黑，再切场景；inDur > 0 时切完从全黑淡回来
 let fade = null;
 // 标题画面的一次性背景音乐：进入游戏后要停掉
 let titleMusic = null;
-function fadeGo(name, dur = 0.45) {
-  if (!fade) fade = { t0: now, to: name, dur };
+function fadeGo(name, dur = 0.45, inDur = 0) {
+  if (!fade) fade = { t0: now, to: name, dur, inDur };
 }
 
 // ———————————————————— 输入 ————————————————————
@@ -71,7 +71,13 @@ function sceneClick(x, y) {
 // ———————————————————— 主循环 ————————————————————
 
 function update() {
-  if (fade && now - fade.t0 >= fade.dur) { const to = fade.to; fade = null; go(to); }
+  if (fade) {
+    if (fade.to && now - fade.t0 >= fade.dur) {
+      const to = fade.to;
+      fade = { t0: now, to: null, dur: 0, inDur: fade.inDur };   // 切完场景，从全黑淡入
+      go(to);
+    } else if (!fade.to && now - fade.t0 >= fade.inDur) fade = null;
+  }
   if (scene === 'desk') updateDesk();
   if (scene === 'boot') { bootSounds(); if (BOOT_LINES && st() > BOOT_LINES.end) go('title'); }
 }
@@ -86,7 +92,7 @@ function render() {
   else if (scene === 'desk') drawDesk();
   else if (scene === 'summary') drawSummary(t);
   else if (scene === 'result') drawResult(t);
-  if (fade) darken(seg(now, fade.t0, fade.t0 + fade.dur));
+  if (fade) darken(fade.to ? seg(now, fade.t0, fade.t0 + fade.dur) : 1 - seg(now, fade.t0, fade.t0 + fade.inDur));
 
   const g = canvasEl.getContext('2d');
   g.imageSmoothingEnabled = false;

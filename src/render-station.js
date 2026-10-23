@@ -1,5 +1,5 @@
 'use strict';
-// 检查站绘制：HUD、请求排队管线、审查窗、桌面窗口、任务栏、右侧决定栏、比对压暗、横幅与提示。
+// 检查站绘制：HUD、请求排队管线、审查窗、桌面窗口、任务栏、右侧决定栏、审查压暗、横幅与提示。
 // 只读 station.js / desk.js 的状态，不改判定逻辑；开场动画在 intro.js。
 
 // ———————————————————— 绘制 ————————————————————
@@ -26,10 +26,7 @@ function drawHud() {
   const parts = [];
   if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`已审核 ${RUN.processed}`, K.GREEN]);
   if (RUN.mode === 'perfect') parts.push([`用时 ${mmss(elapsed())}`, K.WHITE], [`得分 ${RUN.score}`, K.GREEN]);
-  if (RUN.mode === 'story') {
-    parts.push([`DAY ${RUN.day}`, K.WHITE], [worldClock(), D.closing ? K.AMBER : K.WHITE],
-      [`今日正确 ${D.correct}`, K.GREEN], [`处分 ${D.cites}`, D.cites ? K.RED : K.DIM]);
-  }
+  if (RUN.mode === 'story') parts.push([`DAY ${RUN.day}`, K.WHITE]);
   if (RUN.mode === 'endure') {
     parts.push([`用时 ${mmss(elapsed())}`, K.WHITE],
       [`Token ${RUN.score}`, RUN.score < 0 ? K.RED : K.GREEN]);
@@ -212,7 +209,7 @@ function drawScreen() {
   if (draggingWin()) drawWins(draggingWin());
 }
 
-// 这一班桌面上有的应用：规则组没有『比对』时不显示它
+// 这一班桌面上有的应用：规则组没有『审查』时不显示它
 const appKeys = () => Object.keys(APPS).filter((k) => k !== 'insp' || rules().inspect);
 
 function drawAppIcons() {
@@ -229,8 +226,7 @@ function drawAppIcons() {
 
 // 任务栏：每个桌面窗口一个按钮（色块 + 名字）
 const TASK_COL = { doc: C.CYAN, cite: C.RED, book: C.CLAUDE, notice: C.CLAUDE, hist: C.CYAN, smsf: C.GREEN, sms: C.GREEN };
-// 任务栏右下角的日期：故事模式再加班次时间；比对模式只圈日期本身，不圈后面显示用的时间
-const dateText = () => (RUN.mode === 'story' ? `${fmtDate(today())}  ${worldClock()}` : fmtDate(today()));
+// 任务栏右下角的日期：故事模式再加班次时间；审查模式只圈日期本身，不圈后面显示用的时间
 function dateBox() {
   const date = fmtDate(today());
   const clock = RUN.mode === 'story' ? tw(`  ${worldClock()}`, 8) : 0;
@@ -251,8 +247,16 @@ function drawTaskbar() {
     if (s) txt(box[0] + 9, box[1] + 2, s, 8, w.min ? K.DIM : K.TEXT);
   }
   // 世界观时间只在故事模式显示；日期都要显示（核对有效期）
-  const s = dateText();
-  txt(DATE_BOX[2], DATE_BOX[1] + 2, s, 8, K.TEXT, 'ra');
+  const date = fmtDate(today());
+  if (RUN.mode === 'story') {
+    const clock = worldClock();
+    // 下班前一小时：时间在黄白之间闪烁，日期保持原色
+    const col = lastHour() ? (Math.floor(now * 3) % 2 ? K.WHITE : K.AMBER) : K.TEXT;
+    txt(DATE_BOX[2] - tw(`  ${clock}`, 8), DATE_BOX[1] + 2, date, 8, K.TEXT, 'ra');
+    txt(DATE_BOX[2], DATE_BOX[1] + 2, clock, 8, col, 'ra');
+  } else {
+    txt(DATE_BOX[2], DATE_BOX[1] + 2, date, 8, K.TEXT, 'ra');
+  }
 }
 
 // 决定栏：收起时只在右边缘露出把手
@@ -279,14 +283,14 @@ function drawTray() {
   G.restore();
 }
 
-// 比对模式：整个下方压暗，只留下可点的栏位（和『比对』图标）
+// 审查模式：整个下方压暗，只留下可点的栏位（和『审查』图标）
 let OVERLAY = null;
 function drawInspect() {
   const sel = D.insp.sel.map((s) => s.key);
   const hover = fieldAt(ptr.x, ptr.y);
   const view = [SCREEN[0] + 1, SCREEN[1], SCREEN[2], TASKBAR[1] - 1];
   const vis = fieldBoxes().filter((f) => !f.w || topWinAt(center(f.box)) === f.w || sel.includes(f.key));
-  // 历史记录整扇窗保持明亮：比对时还要能读当前这段对话
+  // 历史记录整扇窗保持明亮：审查时还要能读当前这段对话
   const hist = shownWins().filter((w) => w.kind === 'hist').map((w) => {
     const b = winBox(w);
     return [Math.max(b[0], view[0]), Math.max(b[1], view[1]), Math.min(b[2], view[2]), Math.min(b[3], view[3])];
@@ -309,7 +313,7 @@ function drawInspect() {
     const [a, b] = D.insp.sel.map((s) => center(s.box));
     line(a[0], a[1], b[0], b[1], K.AMBER);
   }
-  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '比对：依次点两项信息；再点『比对』图标退出', 8, K.AMBER);
+  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '审查：依次点两项信息；再点『审查』图标退出', 8, K.AMBER);
 }
 
 function topWinAt([x, y]) {
@@ -326,7 +330,7 @@ function drawBanner() {
   txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 17, b.sub, 8, K.TEXT);
   const e = D.ent;
   if (b.ok && e && !e.leaving) {
-    const asked = e.asked.has(b.issue);   // 问过的异常固定为已按下；比对出新异常才会重新变成询问
+    const asked = e.asked.has(b.issue);   // 问过的异常固定为已按下；审查出新异常才会重新变成询问
     button(ASK_BTN, asked ? '已询问' : '询问', K.AMBER, { size: 8, off: asked });
   }
   return true;

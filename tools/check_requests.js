@@ -1,5 +1,5 @@
 'use strict';
-// 请求生成回归检查：请求券 / 比对栏位 / 前两天的出题范围 / 手册与通告版面。
+// 请求生成回归检查：请求券 / 审查栏位 / 前两天的出题范围 / 手册与通告版面。
 // 不依赖浏览器，直接跑：node tools/check_requests.js
 const fs = require('fs');
 const vm = require('vm');
@@ -175,6 +175,39 @@ for (let i = 0; i < 20000 && !sawScope; i++) {
   if (!spec.checks.has(pairKey('api.用途', 'tok.请求'))) fail('API 授權用途缺少與令牌請求摘要的比對', spec);
 }
 if (!sawScope) fail('無盡模式應會出用途不一致', {});
+// 無盡模式的憑證不再印「套餐」：欄位與比對關係都不要留
+if (FULL_RULES.credRows.includes('套餐')) fail('無盡模式憑證不應再有套餐欄', {});
+for (let i = 0; i < 3000; i++) {
+  const spec = makeRequest(day(1), 0.3, [], FULL_RULES);
+  const cred = spec.docs.find((d) => d.key === 'cred');
+  if (!cred) continue;
+  if (cred.rows.some((r) => r[0] === '套餐')) fail('無盡模式憑證不應印套餐', spec);
+  if (cred.fields['cred.套餐']) fail('無盡模式憑證不應登記套餐欄位', spec);
+}
+
+
+// API 授權：移除「持有人」欄位；暱稱不符只落在憑證上
+let sawApiDoc = false, sawName = false;
+for (let i = 0; i < 20000 && (!sawApiDoc || !sawName); i++) {
+  const spec = makeRequest(day(1), 0.9, [], FULL_RULES);
+  const api = spec.docs.find((d) => d.key === 'api');
+  if (api) {
+    sawApiDoc = true;
+    if (api.rows.map((r) => r[0]).join(',') !== 'IP,用途,有效期') fail('API 授權欄位應為 IP / 用途 / 有效期', spec);
+    if (api.fields['api.持有人']) fail('API 授權不應登記持有人比對欄位', spec);
+    if ([...spec.checks].some((k) => k.includes('api.持有人'))) fail('API 授權不應與持有人建立比對', spec);
+  }
+  if (spec.flaw === 'name') {
+    sawName = true;
+    if (spec.nameField !== 'cred.昵称') fail('暱稱不符應只落在憑證上', spec);
+    if (!spec.checks.has(pairKey('cred.昵称', 'rv.昵称'))) fail('憑證暱稱缺少與本人的比對關係', spec);
+    if (spec.issues.some((is) => is.pairs.some((p) => p.includes('api.持有人')))) fail('暱稱不符不應再指向 API 授權', spec);
+  }
+}
+if (!sawApiDoc) fail('無盡模式應會出 API 授權', {});
+if (!sawName) fail('無盡模式應會出暱稱不符', {});
+
+
 
 // 身份檔案：曾用名有時一個都沒有（印「無」）；本人改過暱稱的合規請求一定留著舊暱稱
 let sawNoOldname = false, sawOldname = false;
@@ -198,18 +231,35 @@ if (!sawOldname) fail('身份檔案應會出現曾用名', {});
 // 身份檔案的版面：底部那行核對規則不能超出視窗，欄位仍要能比對
 {
   const foot = '用户的手机与请求的昵称必须与此档案一致';
-  const rec = new InfoWin('sms', '身份档案', 'RECORD', [['昵称', 'mlee', true], ['曾用名', '无', true], ['手机', '+1 555 0100', true]], foot);
+  const rec = new InfoWin('sms', '身份记录', 'RECORD', [['昵称', 'mlee', true], ['曾用名', '无', true], ['手机', '+1 555 0100', true]], foot);
   if (!rec.fields['sms.曾用名'] || !rec.fields['sms.手机']) fail('身份檔案欄位錯', {});
   if (rec.w - 12 < tw(foot, 8)) fail('身份檔案太窄，底部提示會超出視窗', {});
-  if (rec.h <= new InfoWin('sms', '身份档案', 'RECORD', [['昵称', 'mlee', true]]).h) fail('底部提示應讓檔案變高', {});
+  if (rec.h <= new InfoWin('sms', '身份记录', 'RECORD', [['昵称', 'mlee', true]]).h) fail('底部提示應讓檔案變高', {});
 }
+// SMS 表單：「將此表單交給用戶」是視窗頂部的獨立提示，不佔用表單列、也不登記比對欄位
+{
+  const note = '将此表单交给用户';
+  const form = new InfoWin('smsf', '验证 SMS', 'SMS', [['手机', '________________']], '', note);
+  const plain = new InfoWin('smsf', '验证 SMS', 'SMS', [['手机', '________________']]);
+  if (form.note !== note) fail('SMS 表單缺少頂部提示', {});
+  if (form.rows.length !== 1 || form.rows[0][0] !== '手机') fail('SMS 表單提示不應混進欄位列', {});
+  if (Object.keys(form.fields).length) fail('SMS 空白表單不應登記比對欄位', {});
+  const filled = new InfoWin('smsf', '验证 SMS', 'SMS', [['手机', '+1 555 0100', true]], '', note);
+  const phone = filled.fields['smsf.手机'];
+  if (!phone) fail('SMS 表單缺少手機欄位', {});
+  if (phone[1] < TITLE_H + 18) fail('SMS 手機欄位應排在提示列下方', {});
+  if (form.h <= plain.h) fail('提示列應讓 SMS 表單變高', {});
+  if (phone[3] > filled.h) fail('SMS 手機欄位超出表單', {});
+}
+
+
 
 // 令牌的「运营商」：第四天起（以及无尽模式）每张令牌都印运营商，格式「主要城市 · 运营商名」。
 // 合规请求的运营商属于凭证地区；只有 isp 问题会印成别处的运营商，且可以拘留。
 const ispOf = get('ispOf');
 const SUSPEND_FLAWS = get('SUSPEND_FLAWS');
 if (!SUSPEND_FLAWS.includes('isp')) fail('運營商與地區不符應可拘留', {});
-if (!FULL_RULES.rules.some((r) => r.key === 'isp' && !r.hidden)) fail('無盡模式的手冊應有運營商條例', {});
+if (!FULL_RULES.rules.some((r) => r.key === 'isp')) fail('無盡模式應啟用運營商條例', {});
 const ispStats = { total: 0, mismatch: 0 };
 for (const [label, rs, date] of [['day4', STORY[3], day(4)], ['day5', STORY[4], day(5)], ['endless', FULL_RULES, day(1)]]) {
   for (let i = 0; i < 5000; i++) {
@@ -291,9 +341,10 @@ if (!sawSig) fail('無盡模式應會出簽名問題', {});
 // 手冊「簽名詳情」：只有憑證與 API 授權，憑證用安全部會話中心的式樣
 {
   const rb = new Rulebook(FULL_RULES);
-  const seals = rb.pages[4];
-  if (Object.keys(seals.fields).sort().join(',') !== 'book.api,book.cred') fail('簽名詳情頁欄位錯', {});
-  if (!seals.rows.some((r) => r.seal === 'cred') || !seals.rows.some((r) => r.seal === 'api')) fail('簽名詳情頁缺少憑證 / API 授權', {});
+  const sealPages = rb.pages.filter((p) => p.fields['book.cred'] || p.fields['book.api']);
+  const sealFields = sealPages.flatMap((p) => Object.keys(p.fields)).sort().join(',');
+  if (sealFields !== 'book.api,book.cred') fail('簽名詳情頁欄位錯', {});
+  if (!sealPages.some((p) => p.rows.some((r) => r.seal === 'cred')) || !sealPages.some((p) => p.rows.some((r) => r.seal === 'api'))) fail('簽名詳情頁缺少憑證 / API 授權', {});
   const cs = get('genuine')('cred');
   if (cs.issuer !== '安全部会话中心' || cs.print !== '7D13-0BE6') fail('憑證簽名式樣錯', {});
 }
@@ -303,24 +354,55 @@ for (let i = 0; i < STORY.length; i++) {
   const rb = new Rulebook(STORY[i]);
   const withRegion = rb.pages.filter((p) => p.fields['rule.region']);
   const withVoucher = rb.pages.filter((p) => p.fields['rule.voucher']);
-  if (i < 2 && (withRegion.length !== 2 || withVoucher.length)) fail(`day${i + 1} 手冊欄位錯`, {});
-  if (i === 2 && (withRegion.length !== 2 || withVoucher.length !== 1)) fail('day3 手冊應有地區條例（條例頁＋支持地區頁）與請求券條例（條例頁）', {});
+  const regionSection = rb.pages.filter((p) => p.rows[0] && (p.rows[0].s === '二、支持地区' || p.rows[0].s === '二、支持地区（续）'));
+  if (withRegion.length < 2) fail(`day${i + 1} 手冊缺少地區條例欄位`, {});
+  if (regionSection.length < 1 || regionSection.some((p) => !p.fields['rule.region'])) fail(`day${i + 1} 支持地區分頁缺少地區條例欄位`, {});
+  if (withVoucher.length !== (i === 2 ? 1 : 0)) fail(`day${i + 1} 手冊請求券條例欄位錯`, {});
+  if (i >= 1 && regionSection.length < 2) fail(`day${i + 1} 支持地區太長時應自動分頁`, {});
+  if (rb.h > 160) fail(`day${i + 1} 手冊不應再隨內容長高（${rb.h}）`, {});
   if (i === 2 && !rb.pages.some((p) => p.rows.some((r) => r.s === '外国请求须持有效请求券'))) fail('day3 手冊缺少請求券條例', {});
 }
 
-// 無盡模式的「支持地區」頁：令牌印語言，因此列出地區 / 語言，但不列時區
+// 無盡模式的「支持地區」頁：令牌印語言，因此列出地區 / 語言，但不列時區；內容太長要分頁
 {
   const rb = new Rulebook(FULL_RULES);
-  const texts = rb.pages[3].rows.map((r) => r.s);
+  const regionSection = rb.pages.filter((p) => p.rows[0] && (p.rows[0].s === '二、支持地区' || p.rows[0].s === '二、支持地区（续）'));
+  const texts = regionSection.flatMap((p) => p.rows.map((r) => r.s));
+  if (regionSection.length < 2) fail('無盡模式支持地區頁應該分頁', {});
   if (!texts.includes('语言') || texts.includes('时区')) fail('無盡模式支持地區頁欄位錯', {});
   if (!texts.includes('en-US')) fail('無盡模式支持地區頁缺少語言代碼', {});
   if (texts.includes('UTC-05:00')) fail('無盡模式支持地區頁不應列出時區', {});
+  // 新加入的支持地區：大洲、地區、語言都要印在分頁上
+  for (const s of ['大洋洲', '澳大利亚', '加拿大', 'en-AU', 'en-CA']) {
+    if (!texts.includes(s)) fail(`支持地區頁缺少 ${s}`, {});
+  }
   // 令牌不印時區時，基本條例也只提語言
-  if (!rb.pages[2].rows.some((r) => r.s === '语言须与地区一致')) fail('無盡模式條例應只提語言', {});
-  if (rb.pages[2].rows.some((r) => r.s === '语言和时区须与地区一致')) fail('無盡模式條例不應再提時區', {});
-  // 運營商條例：手冊要列出，且是可比對的欄位
-  if (!rb.pages[2].fields['rule.isp']) fail('無盡模式手冊缺少運營商條例', {});
-  if (!rb.pages[2].rows.some((r) => r.s === '令牌运营商须与凭证地区一致')) fail('無盡模式運營商條例文字錯', {});
+  const rulePages = rb.pages.filter((p) => p.fields['rule.docs']);
+  const ruleTexts = rulePages.flatMap((p) => p.rows.map((r) => r.s));
+  if (!ruleTexts.includes('语言须与地区一致')) fail('無盡模式條例應只提語言', {});
+  if (ruleTexts.includes('语言和时区须与地区一致')) fail('無盡模式條例不應再提時區', {});
+  // 隱藏條例（例如無盡模式的運營商 / IP / 簽名）仍要生效，但不印在手冊上、不登記比對欄位
+  for (const r of FULL_RULES.rules) {
+    if (!r.hidden) continue;
+    if (rulePages.some((p) => p.fields['rule.' + r.key]) || ruleTexts.includes(r.head)) {
+      fail(`隱藏條例不應印在手冊上：${r.key}`, {});
+    }
+  }
+}
+
+// 新地區與翻頁按鈕用到的字形：漏字會讓手冊、證件與標題列印出空白
+for (const ch of '澳大利亚加拿大悉尼渥太华大洋洲（续）◀▶') {
+  if (!get('ASSETS').font[8][ch]) fail(`缺少字形：${ch}`, {});
+}
+
+// 分頁後每一頁的正文都不能壓到底部書籤列（書籤列從 h - MARK_H - 2 開始）
+for (const [label, rs] of [['endless', FULL_RULES], ...STORY.map((s, i) => [`day${i + 1}`, s])]) {
+  const rb = new Rulebook(rs);
+  for (const p of rb.pages) {
+    for (const r of p.rows) {
+      if (r.y + 8 > rb.h - 14) fail(`${label} 手冊文字壓到書籤列（y=${r.y}, h=${rb.h}）`, {});
+    }
+  }
 }
 
 // 通告版面：第三天掛在 (316,126)，視窗底不能超過桌面下緣 (343)
@@ -356,6 +438,30 @@ for (let i = 0; i < STORY.length; i++) {
   const n = new OfficialNotice(today(1), { body: '測試', sig: true, pages: [], news: null, wanted: [] });
   if (!n.pages[0].fields['notice.cred']) fail('通告缺少憑證簽名欄', {});
   if (n.pages[0].fields['notice.tok']) fail('通告不應再有令牌簽名欄', {});
+}
+
+// 手冊 / 通告的標題列翻頁列：◀ 上一頁、▶ 下一頁，兩邊都要能點且可循環
+{
+  const center = (b) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+  const checkTabs = (label, win, sub) => {
+    const { prev, next } = win.tabs;
+    if (win.sub !== sub) return fail(`${label} 左側英文副標應為 ${sub}`, {});
+    if (!prev || !next) return fail(`${label} 缺少左右翻頁按鈕`, {});
+    if (prev[2] >= next[0]) return fail(`${label} 左右翻頁按鈕重疊`, {});
+    if (next[2] >= win.w - 24) return fail(`${label} 翻頁按鈕壓到視窗按鈕`, {});
+    const subRight = prev[0] - 6;
+    const subLeft = subRight - tw(win.sub, 8);
+    if (subLeft < 5 + tw(win.title, 8) + 6) return fail(`${label} 右側英文副標與中文標題重疊`, {});
+    win.page = 0;
+    if (!win.press(...center(next)) || win.page !== 1) fail(`${label} 右按鈕應翻到下一頁`, {});
+    if (!win.press(...center(prev)) || win.page !== 0) fail(`${label} 左按鈕應翻回上一頁`, {});
+    win.page = 0;
+    if (!win.press(...center(prev)) || win.page !== win.npages - 1) fail(`${label} 左按鈕應能循環到最後一頁`, {});
+  };
+  checkTabs('手冊', new Rulebook(FULL_RULES), 'CONSTITUTION');
+  const n = new OfficialNotice(today(1), { body: '測試', sig: true, pages: [{ head: '附頁', body: '測試' }], news: null, wanted: [] });
+  if (n.npages < 2) fail('通告應該有多頁可翻', {});
+  checkTabs('通告', n, 'NOTICE');
 }
 
 // 請求券證件：只有有效期一欄、沒有簽名；頂部有「欢迎使用 Claude」歡迎橫幅

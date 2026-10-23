@@ -25,7 +25,7 @@ python -m http.server
 | 6 | `src/story.js` | `STORY_DATE`、`STORY`（逐日规则 / 通告 / 报纸） |
 | 7 | `src/station.js` | 全局状态、`MODES`、一班的生命周期、请求进出、判定 |
 | 8 | `src/desk.js` | 桌面窗口管理、任务栏、决定栏、拖放、输入分发 |
-| 9 | `src/inspect.js` | 比对模式与验证 SMS |
+| 9 | `src/inspect.js` | 审查模式与验证 SMS |
 | 10 | `src/render-station.js` | 检查站绘制 |
 | 11 | `src/intro.js` | 开场与拘留押送动画 |
 | 12 | `src/screens.js` | 开机、标题、日期卡、报纸、下班结算、结束画面 |
@@ -42,7 +42,7 @@ python -m http.server
 | `ptr`、`drag` | `station.js` | 指针状态、当前拖拽的窗口 / 图标 |
 | `scene`、`sceneT0` | `station.js` | 当前场景与进入时间 |
 | `RUN` | `station.js` | 这一局：模式、天数、存款、分数、最高纪录等 |
-| `D` | `station.js` | 这一班：队列、当前请求、桌面窗口、计时器、比对状态等 |
+| `D` | `station.js` | 这一班：队列、当前请求、桌面窗口、计时器、审查状态等 |
 
 `RUN` 跨天保留（故事模式），`D` 每天 / 每局重建。场景切换走 `main.js` 的 `go()` / `fadeGo()`。
 
@@ -52,9 +52,9 @@ python -m http.server
 2. 点『下一位』→ `callNext()` → `makeRequest(today(), mode().pBad, D.wanted, rules())` 生成一个请求 `spec`。
 3. `rules()` 在故事模式返回当天的 `STORY` 规则组，无尽模式返回 `FULL_RULES`。
 4. 玩家盖章 → `decide(kind)`；交还全部证件 → `finishRequest()` → `judge(e, kind)` 按 `spec.flaw` 判定对错。
-5. 比对模式用 `fieldBoxes()` 收集可点栏位（证件栏位、手册条例、任务栏日期、审查窗字段、通告、SMS 档案），`compareOutcome()` 用 `spec.issues` / `spec.notes` / `spec.checks` 区分 矛盾 / 无矛盾 / 无关联。
+5. 审查模式用 `fieldBoxes()` 收集可点栏位（证件栏位、手册条例、任务栏日期、审查窗字段、通告、SMS 档案），`compareOutcome()` 用 `spec.issues` / `spec.notes` / `spec.checks` 区分 矛盾 / 无矛盾 / 无关联。
 
-`makeRequest` 的 `spec` 字段、规则组字段、比对栏位 key 的完整说明写在 `src/data.js` 文件头；改出题逻辑前先读那段注释。
+`makeRequest` 的 `spec` 字段、规则组字段、审查栏位 key 的完整说明写在 `src/data.js` 文件头；改出题逻辑前先读那段注释。
 
 ## 素材
 

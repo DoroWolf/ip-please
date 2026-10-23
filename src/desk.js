@@ -88,7 +88,7 @@ function dropDoc(win, x, y, remove) {
   const zone = stampZoneAt(x, y);
   if (zone) {
     if (!isStampDoc(win)) {
-      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先比对出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER);
+      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先审查出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER);
     } else decide(zone);
     return true;
   }
@@ -109,7 +109,7 @@ function deskDown(x, y) {
   const b = D.insp.banner;
   if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
   if (rules().inspect && inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
-  // 柜台第一个按钮：先询问异常才有措施；按下后锁定，直到比对出新的异常并重新询问
+  // 柜台第一个按钮：先询问异常才有措施；按下后锁定，直到审查出新的异常并重新询问
   const e = D.ent;
   if (inBox(x, y, NEXT_BTN)) {
     if (measureArmed(e)) {
@@ -119,12 +119,12 @@ function deskDown(x, y) {
     if (measureAvailable(e)) {
       const b = D.insp.banner;
       const newIssue = b && b.ok && !e.asked.has(b.issue);
-      toast(e.measureUsed && !newIssue ? '措施已按下：再比对出新的异常，才能重新询问' : '先询问异常，再采取措施', K.AMBER);
+      toast(e.measureUsed && !newIssue ? '措施已按下：再审查出新的异常，才能重新询问' : '先询问异常，再采取措施', K.AMBER);
       return;
     }
   }
   if (D.insp.on) {
-    // 比对模式下也能翻手册 / 通告（页签 / 书签 / 目录），方便对照签名式样和特别关注对象
+    // 审查模式下也能翻手册 / 通告（页签 / 书签 / 目录），方便对照签名式样和特别关注对象
     const w = topWinAt([x, y]);
     if (w && w.win.press && w.win.press(x - w.x, y - w.y)) { SFX.play('select'); return; }
     if (inBox(x, y, LOWER)) inspectClick(x, y);

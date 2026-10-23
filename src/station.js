@@ -2,7 +2,7 @@
 // 风控检查站：上方请求排队，左下审查窗，右下电脑桌面。故事模式和三种无尽模式共用这一套：
 //
 // 本文件：全局状态、模式与计时、一班的生命周期、请求进出与判定。
-// 桌面窗口 / 拖放 → desk.js　比对 / 验证 SMS → inspect.js　绘制 → render-station.js　开场 → intro.js
+// 桌面窗口 / 拖放 → desk.js　审查 / 验证 SMS → inspect.js　绘制 → render-station.js　开场 → intro.js
 // 载入顺序见 index.html：station.js 必须先于 desk.js / inspect.js / render-station.js / intro.js。
 // 节奏差别在 MODES 里，生效的条例 / 证件在规则组里（无尽模式 FULL_RULES，故事模式每天一组 STORY）。
 
@@ -13,10 +13,10 @@ const SCREEN = [216, 118, W - 1, H - 1];
 const DESK_AREA = [217, 119, W - 2, 343];
 const TASKBAR = [216, 344, W - 1, H - 1];
 const TASK_X = [220, 540];   // 任务栏上放窗口按钮的范围（右边是日期）
-const DATE_BOX = [548, 346, 636, 357];   // 日期右对齐到这里；比对时实际的框按文字宽度算（dateBox）
-const LOWER = [0, 118, W - 1, H - 1];   // 下方操作区：比对模式整块压暗
-// 桌面右下角一排应用：手册 / 通告 / 历史记录 / 比对
-const APPS = { book: '手册', notice: '通告', hist: '历史记录', insp: '比对' };
+const DATE_BOX = [548, 346, 636, 357];   // 日期右对齐到这里；审查时实际的框按文字宽度算（dateBox）
+const LOWER = [0, 118, W - 1, H - 1];   // 下方操作区：审查模式整块压暗
+// 桌面右下角一排应用：手册 / 通告 / 历史记录 / 审查
+const APPS = { book: '手册', notice: '通告', hist: '历史记录', insp: '审查' };
 const APP_BOX = {};
 Object.keys(APPS).forEach((k, i) => { const x = 500 + i * 34; APP_BOX[k] = [x, 310, x + 25, 329]; });
 const INSPECT_ICON = APP_BOX.insp;
@@ -26,11 +26,11 @@ const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W 
 const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
-// 审查窗里的可比对栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在令牌上（tok.请求）。
+// 审查窗里的可审查栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在令牌上（tok.请求）。
 const RV_FIELDS = {
   'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
 };
-// 柜台：审查窗下方放证件的一排（按钮右边）。没有证件时，拿空柜台和条例比对
+// 柜台：审查窗下方放证件的一排（按钮右边）。没有证件时，拿空柜台和条例审查
 const COUNTER_BOX = [76, 318, 205, 356];
 const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙墙上的开口）
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
@@ -126,7 +126,7 @@ function startShift() {
     ? new OfficialNotice(fmtDate(today()), { body: rs.notice, sig: !!rs.sig, pages: rs.pages, news: rs.news, wanted: D.wanted })
     : new OfficialNotice(fmtDate(today()), { title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted });
   addWin(D.notice, 'notice', 316, 126);
-  if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『比对』', K.AMBER);
+  if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『审查』', K.AMBER);
   if (RUN.mode === 'story' && RUN.hot) toast(hotThrottle() ? '过热降频：今天提前一小时下线' : '过热降频：今天照常下班', K.AMBER);
 }
 
@@ -166,6 +166,8 @@ function clockText(m) {
   return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${m < 720 ? 'a.m.' : 'p.m.'}`;
 }
 const worldClock = () => clockText(SHIFT_START_MIN + shiftMinutes());
+// 下班前一小时：右下角的时间开始黄白闪烁，提醒收班
+const lastHour = () => RUN.mode === 'story' && !D.closing && shiftEndMin() - (SHIFT_START_MIN + shiftMinutes()) <= 60;
 
 // ———————————————————— 请求进出 ————————————————————
 
@@ -195,7 +197,7 @@ function callNext() {
 function handDocs(e) {
   if (D.ent !== e) return;
   SFX.play('select');
-  // 凭证缺失：先不派发临时返回页。要比对出「凭证缺失」并询问之后，才由 issueReturnTicket 派发
+  // 凭证缺失：先不派发临时返回页。要审查出「凭证缺失」并询问之后，才由 issueReturnTicket 派发
   for (const win of e.spec.docs) D.icons.push({ win });
   layoutIcons();
   e.handed = true;
@@ -207,7 +209,7 @@ function layoutIcons() {
 }
 
 const avatarReady = (e) => e && !e.leaving && now - e.t0 > 0.55 * mode().pace;
-// 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到比对出新的异常并重新询问
+// 验证 SMS 和拘留都是「措施」：先询问异常解锁；按下后锁定，直到审查出新的异常并重新询问
 const canSmsNow = (e) => !!e && !!e.canSms && !e.smsSent && !e.leaving;
 // 拘留必须有红队 clawd 在场：没有红队的天数不显示拘留按钮，也不能拘留（只能拒绝）
 const canSuspendNow = (e) => !!e && !!e.canSuspend && !e.leaving && !!rules().redTeam;
@@ -219,7 +221,7 @@ const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return'
 const stampDocOf = (e) => (e ? e.spec.docs.find((d) => isStampDoc(d)) : null);
 const stampName = (e) => (e && !e.spec.docs.some((d) => d.key === 'cred') ? '临时返回页' : '凭证');
 
-// 凭证缺失：只有在「比对」出问题并按下『询问』之后，系统才派发临时返回页，直接放到桌面上代替凭证接受盖章
+// 凭证缺失：只有在「审查」出问题并按下『询问』之后，系统才派发临时返回页，直接放到桌面上代替凭证接受盖章
 function issueReturnTicket(e) {
   if (!e || e.leaving || stampDocOf(e)) return;   // 有凭证 / 已经派发过就不重复派发
   // 版面只印一行：这张票只用于拒绝请求
@@ -235,8 +237,8 @@ function issueReturnTicket(e) {
 function decide(kind) {
   const e = D.ent;
   if (!e || !e.handed || e.leaving || RUN.fail) return;
-  // 没有凭证：必须先比对出「凭证缺失」并询问，拿到临时返回页才能盖章
-  if (!stampDocOf(e)) { toast('没有凭证：先比对出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER); return; }
+  // 没有凭证：必须先审查出「凭证缺失」并询问，拿到临时返回页才能盖章
+  if (!stampDocOf(e)) { toast('没有凭证：先审查出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER); return; }
   if (e.decided === kind) return;
   e.decided = kind;
   const doc = stampDocOf(e);
@@ -257,7 +259,7 @@ function finishRequest(e) {
   later(e.decided === 'suspend' ? 1.4 : 0.6, () => { if (D.ent === e) D.ent = null; });
 }
 
-// 拘留：比对出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。切断连接，桌面上和柜台上的证件全部清掉，直接判定
+// 拘留：审查出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。切断连接，桌面上和柜台上的证件全部清掉，直接判定
 function suspend() {
   const e = D.ent;
   if (!canSuspendNow(e) || RUN.fail) return;
@@ -348,7 +350,7 @@ function finishRun() {
   D.ended = true;
   if (RUN.mode === 'endure') RUN.score = RUN.peak;   // 耐力模式：分数为到达过的最大 token
   saveRecord();
-  go('result');
+  fadeGo('result', 0.9, 0.5);   // 先慢慢压黑，再从黑屏进入结算
 }
 
 // 下班：排队的请求全部离开，处理完手上这个就结束
@@ -357,13 +359,13 @@ function closeShift() {
   for (const p of D.queue) p.leave = now + Math.random() * 0.4;
   later(1.8, () => { D.queue = []; });
   SFX.play('bell');
-  toast(`${worldClock()} 下班：排队的请求已离开`, K.AMBER);
+  toast(`排队的请求已离开`, K.AMBER);
 }
 
 function endDay() {
   if (D.ended) return;
   D.ended = true;
-  later(2.4, () => go('summary'));
+  later(2.4, () => fadeGo('summary', 0.9, 0.5));   // 先慢慢压黑，再从黑屏进入结算
 }
 
 // ———————————————————— 每帧 ————————————————————

@@ -147,7 +147,7 @@ function drawTitle(t) {
     for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[m] || 0);
     button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
   }
-  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拒绝  E 比对  R 手册  空格 下一位', 8, K.DIM, 'ma');
+  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拒绝  E 审查  R 手册  空格 下一位', 8, K.DIM, 'ma');
   txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }
@@ -269,7 +269,7 @@ function statusAfter() {
   else out.push(['温度正常', 'ok']);
   if (stale >= 3) out.push(['模型退化：已无法完成审查', 'bad']);
   else if (stale === 2) out.push(['严重退化：再不更新就会下线', 'bad']);
-  else if (stale === 1) out.push(['训练数据过期：明天无法使用『比对』', 'warn']);
+  else if (stale === 1) out.push(['训练数据过期：明天无法使用『审查』', 'warn']);
   else out.push(['训练数据最新', 'ok']);
   return { hot, stale, lines: out };
 }

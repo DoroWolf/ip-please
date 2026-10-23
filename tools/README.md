@@ -5,7 +5,7 @@
 | 路径 | 用途 |
 |---|---|
 | `build_assets.py` | 重新生成 `src/assets.js`（字体图集、网络头像、报纸配图、Claude 徽标）。改了游戏文字或头像画法后要跑 |
-| `check_requests.js` | 纯 Node 的请求生成回归检查：请求券、比对栏位、前两天的出题范围、手册 / 通告版面 |
+| `check_requests.js` | 纯 Node 的请求生成回归检查：请求券、审查栏位、前两天的出题范围、手册 / 通告版面 |
 | `screenshot_check.py` | 用 Playwright 打开 `index.html`，跑一遍故事模式第三天的界面并截图；有 console 错误就失败 |
 | `pp/base.py`、`pp/people.py` | 像素画法：画布、字体、头像生成 |
 | `assets/fonts/` | 缝合像素字体 Fusion Pixel Font（8 / 10 / 12px）与 OFL 许可 |

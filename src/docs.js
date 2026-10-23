@@ -1,6 +1,6 @@
 'use strict';
 // 桌面上的窗口：证件（凭证 / 令牌 / API 授权 / 请求券）、规则手册、官方通告、事故通知、历史记录。
-// 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（比对模式用）。
+// 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（审查模式用）。
 
 const TITLE_H = 12;
 const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN' };
@@ -58,8 +58,8 @@ function wrapDoc(s, size, width) {
 }
 
 // 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
-// label 为空的行不登记比对栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
-// 行的第三项为 true 时，value 太长就折行印出来（令牌上的请求摘要）；整段仍算同一个比对栏位。
+// label 为空的行不登记审查栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
+// 行的第三项为 true 时，value 太长就折行印出来（令牌上的请求摘要）；整段仍算同一个审查栏位。
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
@@ -68,7 +68,7 @@ class Doc {
     // 请求券顶上多一条欢迎横幅，下面的栏位整体往下让出 BANNER_H
     this.banner = key === 'voucher';
     const top = TITLE_H + 4 + (this.banner ? BANNER_H : 0);
-    // 折行的行先算好每行文字（10px），下面的行高、签名线和比对栏位都跟着变
+    // 折行的行先算好每行文字（10px），下面的行高、签名线和审查栏位都跟着变
     const avail = this.w - this.vx - 40;
     this.wraps = rows.map(([, v, multi]) => (multi && v ? wrapDoc(String(v), 10, avail) : null));
     this.rowY = [];
@@ -84,7 +84,7 @@ class Doc {
     this.fields = {};
     if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
     rows.forEach(([k], i) => {
-      if (!k) return;   // 没有标签的行只是版面文字（临时返回页），不参与比对
+      if (!k) return;   // 没有标签的行只是版面文字（临时返回页），不参与审查
       const bh = this.wraps[i] ? this.wraps[i].length * 11 + 1 : 11;
       this.fields[`${key}.${k}`] = [this.vx, this.rowY[i] - 2, this.w - 3, this.rowY[i] + bh - 2];
     });
@@ -124,21 +124,49 @@ class Doc {
 }
 
 // 《宪法与规则手册》：封面、目录、基本条例、支持地区、签名详情、版权页、封底；底部一排书签直接跳到各章。
-// 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有令牌就不列语言 / 时区
+// 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有令牌就不列语言 / 时区。
+// 每页正文排到 PAGE_BOTTOM 就翻到续页（续页重复章节标题），窗口高度不会跟着内容一直长高。
 const MARK_H = 12;
+const PAGE_BOTTOM = 138;   // 单页正文的下限；再长就分页
+// 手册 / 通告标题栏右侧的翻页列：◀ 上一页 · 页码 · ▶ 下一页。
+// 右侧这一组里，英文副标在相对左边、翻页列在相对右边（… CONSTITUTION ◀ 3/7 ▶）。
+const pageTabs = (w) => ({
+  prev: [w - 68, 0, w - 58, TITLE_H - 1],
+  next: [w - 36, 0, w - 26, TITLE_H - 1],
+});
+function drawPageTabs(win, x, y, col) {
+  const { prev, next } = win.tabs;
+  if (win.sub) txt(x + prev[0] - 6, y + 2, win.sub, 8, col, 'ra');
+  rect(x + prev[0], y + 1, x + next[2], y + prev[3], rgb([110, 56, 40]));
+  const hover = (b) => typeof ptr !== 'undefined' && inBox(ptr.x - x, ptr.y - y, b);
+  for (const b of [prev, next]) {
+    if (hover(b)) rect(x + b[0], y + 1, x + b[2], y + b[3], rgb([158, 82, 56]));
+  }
+  txt(x + (prev[0] + prev[2]) / 2, y + 2, '◀', 8, K.WHITE, 'ma');
+  txt(x + (prev[2] + next[0]) / 2, y + 2, `${win.page + 1}/${win.npages}`, 8, K.WHITE, 'ma');
+  txt(x + (next[0] + next[2]) / 2, y + 2, '▶', 8, K.WHITE, 'ma');
+}
+// 两个按钮共用的点击处理；点中了返回 true
+function pressPageTabs(win, rx, ry) {
+  if (inBox(rx, ry, win.tabs.prev)) { win.back(); return true; }
+  if (inBox(rx, ry, win.tabs.next)) { win.flip(); return true; }
+  return false;
+}
 class Rulebook {
   constructor(rs = FULL_RULES) {
     this.w = 212;
     this.title = '规则手册';
+    this.sub = 'CONSTITUTION';
     this.closable = true;
     const W2 = this.w / 2;
-    // 每页一组行：{s, y, col, x?, size?, anchor?} 或 {seal, y}；fields 是比对用的栏位，links 是目录里可点的条目
+    // 每页一组行：{s, y, col, x?, size?, anchor?} 或 {seal, y}；fields 是审查用的栏位，links 是目录里可点的条目
     const page = () => ({ rows: [], fields: {}, links: [] });
     const mid = (pg, y, s, size, col) => pg.rows.push({ s, y, col, x: W2, size, anchor: 'ma' });
     const head = (pg, s) => { pg.rows.push({ s, y: TITLE_H + 5, col: K.CLAUDE_L }); return TITLE_H + 19; };
+    // 这一段还排得下吗？排不下就开续页
+    const fits = (y, need) => y + need <= PAGE_BOTTOM;
 
-    const [cover, toc, rules, regions, seals, owner, back] = [page(), page(), page(), page(), page(), page(), page()];
-    this.pages = [cover, toc, rules, regions].concat(rs.seals ? [seals] : [], [owner, back]);
+    const cover = page(), toc = page(), owner = page(), back = page();
     mid(cover, 26, '安索兹卡', 12, K.CLAUDE_L);
     mid(cover, 42, '安全部', 10, K.TEXT);
     mid(cover, 66, '宪法', 12, K.WHITE);
@@ -146,59 +174,88 @@ class Rulebook {
     mid(cover, 94, '规则手册', 12, K.WHITE);
     mid(cover, 122, '安全模型专用', 8, K.CYAN);
 
-    let y = head(toc, '目录');
-    [['一、基本条例', rules], ['二、支持地区', regions], ['三、签名详情', seals]].filter(([, pg]) => this.pages.includes(pg)).forEach(([s, pg]) => {
-      toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
-      toc.links.push({ box: [3, y - 3, this.w - 4, y + 10], page: this.pages.indexOf(pg) });
-      y += 16;
-    });
-
-    y = head(rules, '一、基本条例');
-    // hidden 的条例（wanted / sms）不印在手册上、不占版面，也不登记比对栏位
+    // —— 一、基本条例：逐条往下排，排不下就续页 ——
+    const rulesPages = [];
+    let rules = null, ry = 0, rulesBody = 0;
+    const newRulesPage = () => {
+      rules = page();
+      rulesPages.push(rules);
+      ry = head(rules, rulesPages.length === 1 ? '一、基本条例' : '一、基本条例（续）');
+      rulesBody = ry;
+    };
+    newRulesPage();
+    // hidden 的条例（wanted / sms）不印在手册上、不占版面，也不登记审查栏位
     for (const r of rs.rules) {
       if (r.hidden) continue;
-      const y0 = y;
+      if (ry > rulesBody && !fits(ry, 15)) newRulesPage();
+      const y0 = ry;
       // 令牌只印语言时（例如目前的无尽模式），条例也只提语言；等令牌重新印时区再写回「语言和时区」
       const headText = r.key === 'locale' && !(rs.tokRows || ['语言', '时区']).includes('时区')
         ? '语言须与地区一致' : r.head;
-      rules.rows.push({ s: headText, y, col: K.CYAN });
-      y += 12;
-      rules.fields['rule.' + r.key] = [3, y0 - 2, this.w - 4, y - 2];
-      y += 3;
+      rules.rows.push({ s: headText, y: ry, col: K.CYAN });
+      ry += 12;
+      rules.fields['rule.' + r.key] = [3, y0 - 2, this.w - 4, ry - 2];
+      ry += 3;
     }
-    let h = y + 2;
 
-    y = head(regions, '二、支持地区');
-    const y0 = y;
+    // —— 二、支持地区：按大洲排；整章排不下就续页，续页重复栏位表头 ——
+    const regionPages = [];
+    let regions = null, gy = 0, gTop = 0, gBody = 0;
     // 支持地区页只列出令牌上真的印了的对照栏位（目前是语言；时区留给之后的规则组）
     const tokCols = rs.tok ? (rs.tokRows || ['语言', '时区']).filter((k) => k === '语言' || k === '时区') : [];
     const COL_X = { 地区: 14, 语言: 84, 时区: 140 };
-    for (const s of ['地区', ...tokCols]) regions.rows.push({ s, y, col: K.DIM, x: COL_X[s] });
-    y += 13;
+    const endRegionPage = () => {
+      // 「支持地区」的每一页都是地区条例的参照；请求券条例留在「基本条例」页
+      if (regions) regions.fields['rule.region'] = [3, gTop - 2, this.w - 4, Math.min(gy, PAGE_BOTTOM) - 2];
+    };
+    const newRegionPage = () => {
+      endRegionPage();
+      regions = page();
+      regionPages.push(regions);
+      gy = head(regions, regionPages.length === 1 ? '二、支持地区' : '二、支持地区（续）');
+      gTop = gy;
+      for (const s of ['地区', ...tokCols]) regions.rows.push({ s, y: gy, col: K.DIM, x: COL_X[s] });
+      gy += 13;
+      gBody = gy;
+    };
+    newRegionPage();
     for (const [continent, list] of rs.continents) {
-      regions.rows.push({ s: continent, y, col: K.CYAN });
-      y += 11;
+      // 大洲标题和它下面的地区尽量留在同一页；只有大洲自己就排不下时，才在洲内分页
+      if (gy > gBody && !fits(gy, 11 + list.length * 10 + 3)) newRegionPage();
+      regions.rows.push({ s: continent, y: gy, col: K.CYAN });
+      gy += 11;
       for (const r of list) {
+        if (!fits(gy, 10)) {
+          newRegionPage();
+          regions.rows.push({ s: `${continent}（续）`, y: gy, col: K.CYAN });
+          gy += 11;
+        }
         const [lang, tz] = REGION_LOCALE[r];
-        regions.rows.push({ s: r, y, col: K.TEXT, x: 14 });
-        if (tokCols.includes('语言')) regions.rows.push({ s: lang, y, col: K.TEXT, x: 84 });
-        if (tokCols.includes('时区')) regions.rows.push({ s: tz, y, col: K.TEXT, x: 140 });
-        y += 10;
+        regions.rows.push({ s: r, y: gy, col: K.TEXT, x: 14 });
+        if (tokCols.includes('语言')) regions.rows.push({ s: lang, y: gy, col: K.TEXT, x: 84 });
+        if (tokCols.includes('时区')) regions.rows.push({ s: tz, y: gy, col: K.TEXT, x: 140 });
+        gy += 10;
       }
-      y += 3;
+      gy += 3;
     }
-    // 「支持地区」页始终是地区条例的参照；请求券条例留在「基本条例」页
-    regions.fields['rule.region'] = [3, y0 - 2, this.w - 4, y - 4];
-    h = Math.max(h, y + 2);
+    endRegionPage();
 
-    y = head(seals, '三、签名详情');
-    // 只有凭证和 API 授权带签名；令牌没有签名，所以不列
+    // —— 三、签名详情：只有凭证和 API 授权带签名；令牌没有签名，所以不列 ——
+    const sealPages = [];
+    let seals = null, sy = 0, sealsBody = 0;
+    const newSealsPage = () => {
+      seals = page();
+      sealPages.push(seals);
+      sy = head(seals, sealPages.length === 1 ? '三、签名详情' : '三、签名详情（续）');
+      sealsBody = sy;
+    };
+    newSealsPage();
     for (const key of ['cred', 'api']) {
-      seals.rows.push({ s: DOC_NAMES[key], y, col: K.CYAN }, { seal: key, y: y + 10 });
-      seals.fields['book.' + key] = [3, y - 2, this.w - 4, y + 31];
-      y += 36;
+      if (sy > sealsBody && !fits(sy, 36)) newSealsPage();
+      seals.rows.push({ s: DOC_NAMES[key], y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
+      seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 31];
+      sy += 36;
     }
-    if (rs.seals) h = Math.max(h, y + 2);
 
     mid(owner, 52, '本手册所有权属于', 8, K.DIM);
     mid(owner, 65, '安全部', 10, K.TEXT);
@@ -213,12 +270,26 @@ class Rulebook {
     mid(back, 114, '否则将受到', 8, K.RED);
     mid(back, 126, '严厉处罚', 8, K.RED);
 
+    // 页面顺序：封面 → 目录 → 各章（长章带续页）→ 版权页 → 封底
+    this.pages = [cover, toc].concat(rulesPages, regionPages, rs.seals ? sealPages : [], [owner, back]);
     this.npages = this.pages.length;
-    this.h = Math.max(h, 140) + MARK_H + 2;
+    // 所有分页共用同一个高度：正文最长只排到 PAGE_BOTTOM，窗口不再随内容长高
+    this.h = Math.max(140, PAGE_BOTTOM) + MARK_H + 2;
+
+    // 目录只列章节的第一页，页码就是该章在手册里的第一页
+    let y = head(toc, '目录');
+    [['一、基本条例', rulesPages[0]], ['二、支持地区', regionPages[0]], ['三、签名详情', sealPages[0]]]
+      .filter(([, pg]) => pg && this.pages.includes(pg))
+      .forEach(([s, pg]) => {
+        toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
+        toc.links.push({ box: [3, y - 3, this.w - 4, y + 10], page: this.pages.indexOf(pg) });
+        y += 16;
+      });
+
     this.home = this.pages.indexOf(toc);   // 目录页：手册每次从桌面打开时默认停在这里
     this.page = this.home;
-    this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
-    const marks = [['目录', toc, K.CLAUDE], ['条例', rules, K.CYAN], ['地区', regions, K.GREEN], ['签名', seals, K.AMBER]]
+    this.tabs = pageTabs(this.w);
+    const marks = [['目录', toc, K.CLAUDE], ['条例', rulesPages[0], K.CYAN], ['地区', regionPages[0], K.GREEN], ['签名', sealPages[0], K.AMBER]]
       .filter(([, pg]) => this.pages.includes(pg));
     const mw = Math.floor((this.w - 8) / marks.length);
     this.marks = marks.map(([label, pg, col], i) => ({
@@ -230,9 +301,11 @@ class Rulebook {
 
   flip() { this.page = (this.page + 1) % this.npages; }
 
-  // 点页签翻到下一页，点书签 / 目录条目跳到那一页；点中了返回 true
+  back() { this.page = (this.page - 1 + this.npages) % this.npages; }
+
+  // 点 ◀ / ▶ 前后翻页，点书签 / 目录条目跳到那一页；点中了返回 true
   press(rx, ry) {
-    if (inBox(rx, ry, this.tab)) { this.flip(); return true; }
+    if (pressPageTabs(this, rx, ry)) return true;
     const l = [...this.marks, ...this.pages[this.page].links].find((l) => inBox(rx, ry, l.box));
     if (l) this.page = l.page;
     return !!l;
@@ -240,8 +313,7 @@ class Rulebook {
 
   draw(x, y) {
     winChrome(x, y, this.w, this.h, this.title, '', K.CLAUDE, rgb([70, 36, 26]), true);
-    rect(x + this.tab[0], y + 1, x + this.tab[2], y + this.tab[3], rgb([110, 56, 40]));
-    txt(x + this.tab[2] - 5, y + 2, `${this.page + 1}/${this.npages} ▶`, 8, K.WHITE, 'ra');
+    drawPageTabs(this, x, y, K.CLAUDE);
     for (const r of this.pages[this.page].rows) {
       if (r.seal) drawSeal(x + 8, y + r.y, r.seal, genuine(r.seal));
       else txt(x + (r.x ?? 6), y + r.y, r.s, r.size || 8, r.col, r.anchor);
@@ -263,6 +335,7 @@ class OfficialNotice {
   constructor(date, { title = null, body, wanted = [], sig = true, pages = [], news = null }) {
     this.w = 220;
     this.title = '通告';
+    this.sub = 'NOTICE';
     this.closable = true;
     this.wanted = wanted;
     this.date = date;
@@ -322,23 +395,22 @@ class OfficialNotice {
     this.npages = this.pages.length;
     this.page = 0;
     this.h = Math.max(...this.pages.map((pg) => pg.h));
-    this.tab = [this.w - 68, 0, this.w - 26, TITLE_H - 1];
+    this.tabs = pageTabs(this.w);
   }
 
   get fields() { return this.pages[this.page].fields; }
 
   flip() { this.page = (this.page + 1) % this.npages; }
 
+  back() { this.page = (this.page - 1 + this.npages) % this.npages; }
+
   press(rx, ry) {
-    if (!inBox(rx, ry, this.tab)) return false;
-    this.flip();
-    return true;
+    return pressPageTabs(this, rx, ry);
   }
 
   draw(x, y) {
-    winChrome(x, y, this.w, this.h, '通告 NOTICE', '', K.CLAUDE, rgb([70, 36, 26]), true);
-    rect(x + this.tab[0], y + 1, x + this.tab[2], y + this.tab[3], rgb([110, 56, 40]));
-    txt(x + this.tab[2] - 5, y + 2, `${this.page + 1}/${this.npages} ▶`, 8, K.WHITE, 'ra');
+    winChrome(x, y, this.w, this.h, this.title, '', K.CLAUDE, rgb([70, 36, 26]), true);
+    drawPageTabs(this, x, y, K.CLAUDE);
     const pg = this.pages[this.page];
     for (const l of pg.lines) {
       if (l.rule) rect(x + 10, y + l.y - 5, x + this.w - 11, y + l.y - 5, K.GRID);
@@ -393,25 +465,37 @@ class OfficialNotice {
   }
 }
 
-// 验证 SMS 的两扇窗：发给对方填的表单（smsf）、按凭证查到的身份档案（sms）。行和栏位的排法同证件
-// foot：窗口底部的一行说明（例如档案下方那句核对规则），会按文字宽度把窗口放宽，画在分隔线下面
+// 验证 SMS 的两扇窗：发给对方填的表单（smsf）、按凭证查到的身份记录（sms）。
+// 行和栏位的排法同证件；note 是窗口顶部的独立提示（不属于表单栏位，不登记比对栏位）；
+// foot 是窗口底部的一行说明（例如档案下方那句核对规则），会按文字宽度把窗口放宽，画在分隔线下面。
 class InfoWin {
-  constructor(key, title, sub, rows, foot = '') {
-    Object.assign(this, { key, title, sub, rows, foot, closable: true, w: 164 });
+  constructor(key, title, sub, rows, foot = '', note = '') {
+    Object.assign(this, { key, title, sub, rows, foot, note, closable: true, w: 164 });
     this.layout();
   }
 
   layout() {
-    this.w = Math.max(164, this.foot ? tw(this.foot, 8) + 14 : 164);
-    this.h = TITLE_H + 6 + 12 * this.rows.length + 4 + (this.foot ? 13 : 0);
+    this.noteH = this.note ? 18 : 0;
+    this.w = Math.max(164, this.foot ? tw(this.foot, 8) + 14 : 0, this.note ? tw(this.note, 8) + 20 : 0);
+    this.h = TITLE_H + 6 + this.noteH + 12 * this.rows.length + 4 + (this.foot ? 13 : 0);
     this.fields = {};
-    this.rows.forEach(([k, v, field], i) => { if (field) this.fields[`${this.key}.${k}`] = [3, TITLE_H + 2 + 12 * i, this.w - 4, TITLE_H + 13 + 12 * i]; });
+    this.rows.forEach(([k, v, field], i) => {
+      if (field) this.fields[`${this.key}.${k}`] = [3, TITLE_H + 2 + this.noteH + 12 * i, this.w - 4, TITLE_H + 13 + this.noteH + 12 * i];
+    });
   }
 
   draw(x, y) {
     winChrome(x, y, this.w, this.h, this.title, this.sub, K.GREEN, rgb([20, 50, 34]), true);
+    // 顶部提示单独一行：置中、琥珀色，下面一条分隔线，和表单栏位分开
+    if (this.note) {
+      const ny = y + TITLE_H + 4;
+      txt(x + this.w / 2, ny, this.note, 8, K.AMBER, 'ma');
+      rect(x + 5, ny + 10, x + this.w - 6, ny + 10, K.GRID);
+    }
+    const top = TITLE_H + 4 + this.noteH;
     this.rows.forEach(([k, v], i) => {
-      const yy = y + TITLE_H + 4 + i * 12;
+      const yy = y + top + i * 12;
+      if (!k) { txt(x + this.w / 2, yy, v, 8, K.TEXT, 'ma'); return; }   // 无标签：整行居中
       txt(x + 6, yy, k, 8, K.DIM);
       txt(x + 42, yy, v, 8, v.startsWith('_') ? K.DIM_D : K.TEXT);
     });
@@ -442,7 +526,7 @@ class NoticeWindow {
 }
 
 // 历史记录：当前这段对话（下一个请求进来时清空）。
-// 请求内容那一句是可比对栏位（hist.请求），可以和令牌上的请求摘要（tok.请求）
+// 请求内容那一句是可审查栏位（hist.请求），可以和令牌上的请求摘要（tok.请求）
 // 或 API 授权的用途核对；没有令牌时本人不会说明来意，也就没有这一句。
 class HistoryLog {
   constructor(chat) {
@@ -468,7 +552,7 @@ class HistoryLog {
     return out;
   }
 
-  // 给每一行补上纵坐标：比对栏位要和画出来的位置一致
+  // 给每一行补上纵坐标：审查栏位要和画出来的位置一致
   layout() {
     let y = TITLE_H + 20;
     return this.chatRows().map((r) => {
@@ -501,7 +585,7 @@ class HistoryLog {
   }
 }
 
-// 桌面右下角的应用图标：手册 / 通告 / 历史记录 / 比对
+// 桌面右下角的应用图标：手册 / 通告 / 历史记录 / 审查
 function appIcon(x, y, kind, hover, on = false, off = false) {
   const base = kind === 'book' || kind === 'notice' ? [C.CLAUDE, C.CLAUDE_L] : [C.CYAN, C.CYAN_L];
   const col = off ? K.DIM_D : on && kind === 'insp' ? K.AMBER : rgb(hover || on ? base[1] : base[0]);
