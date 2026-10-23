@@ -1,0 +1,7 @@
+# 统一用 LF；生成物（assets.js）也照这个规则
+* text=auto eol=lf
+
+# 二进制文件不要做换行转换
+*.png binary
+*.ttf binary
+*.ico binary

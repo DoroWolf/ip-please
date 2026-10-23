@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# 检查脚本的输出（截图、报告）
+tools/.out/
+
+# 本地虚拟环境 / Node 工具
+.venv/
+node_modules/
+*.log
