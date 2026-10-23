@@ -66,11 +66,31 @@ function openApp(key) {
 // ———————————————————— 右侧决定栏 ————————————————————
 
 function updateTray() {
+  if (D.paused) return;   // 暂停时决定栏 / 印章台停在原样
   const T = D.tray, dt = Math.min(0.1, now - T.last);
   T.last = now;
   const ok = !D.insp.on && D.intro === null && !D.ended;
-  T.open = ok && (inBox(ptr.x, ptr.y, TRAY_HOT) || (T.open && inBox(ptr.x, ptr.y, TRAY_BOX)));
+  // Tab / Enter 可以把印章台钉住（一直展开）；否则指针碰到桌面右边缘才滑出
+  T.open = ok && (T.pin || inBox(ptr.x, ptr.y, TRAY_HOT) || (T.open && inBox(ptr.x, ptr.y, TRAY_BOX)));
   T.u = clamp(T.u + (T.open ? dt : -dt) / 0.15);
+}
+
+// 柜台上的证件多了：指针停在柜台左 / 右边缘时整排自动滚动
+function updateCounter(dt) {
+  const max = iconMaxScroll();
+  if (!max) {
+    if (D.iconScroll) { D.iconScroll = 0; layoutIcons(); }
+    return;
+  }
+  if (ptr.y < COUNTER_BOX[1] || ptr.y > COUNTER_BOX[3]) return;
+  let dir = 0;
+  if (ptr.x >= COUNTER_BOX[0] && ptr.x <= COUNTER_BOX[0] + COUNTER_EDGE) dir = -1;
+  else if (ptr.x >= COUNTER_BOX[2] - COUNTER_EDGE && ptr.x <= COUNTER_BOX[2]) dir = 1;
+  if (!dir) return;
+  const next = Math.max(0, Math.min(max, D.iconScroll + dir * COUNTER_SCROLL * dt));
+  if (next === D.iconScroll) return;
+  D.iconScroll = next;
+  layoutIcons();
 }
 
 function stampZoneAt(x, y) {
@@ -88,7 +108,8 @@ function dropDoc(win, x, y, remove) {
   const zone = stampZoneAt(x, y);
   if (zone) {
     if (!isStampDoc(win)) {
-      toast(stampDocOf(e) ? `把${stampName(e)}拖到这里来做决定` : '没有凭证：先审查出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER);
+      // 手上没有能盖章的证件：统一提示把凭证 / 临时返回页拖过来（凭证缺失要先询问，系统才会派发返回页）
+      toast(`把${stampName(e)}拖到这里来做决定`, K.AMBER);
     } else decide(zone);
     return true;
   }
@@ -103,9 +124,23 @@ function dropDoc(win, x, y, remove) {
 
 // ———————————————————— 输入 ————————————————————
 
+// 快速双击审查框：开启审查模式并选中这一栏（空白处双击不开启审查）
+let lastTap = { t: -9, x: -99, y: -99 };
+
 function deskDown(x, y) {
-  if (D.intro !== null) return endIntro();
+  const prev = lastTap;
+  const dbl = quickKeys() && now - prev.t <= 0.28 && Math.hypot(x - prev.x, y - prev.y) <= 8;
+  lastTap = { t: now, x, y };
+  if (D.intro !== null) { lastTap.t = -9; return endIntro(); }
   if (D.ended) return;
+  if (dbl) {
+    const f = fieldAt(x, y);
+    if (f) {
+      // 审查已经开着时，第一下已经把这栏选好了，第二下不再重复
+      if (!D.insp.on) { setInspect(true); inspectClick(x, y); }
+      return;
+    }
+  }
   const b = D.insp.banner;
   if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
   if (rules().inspect && inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
@@ -134,7 +169,7 @@ function deskDown(x, y) {
   for (const t of taskButtons()) if (inBox(x, y, t.box)) return taskClick(t.w);
   if (inBox(x, y, NEXT_BTN)) return callNext();
   for (const ic of [...D.icons].reverse()) {
-    if (!inBox(x, y, iconBox(ic))) continue;
+    if (!inBox(x, y, iconBox(ic)) || !inBox(x, y, COUNTER_BOX)) continue;
     drag = { type: 'icon', inst: ic, start: [x, y], moved: false };
     SFX.play('select', 0.6);
     return;
@@ -204,16 +239,75 @@ function stow(w) {
 }
 
 function deskKey(k) {
-  if (D.intro !== null) return endIntro();
-  if (D.ended) return;
-  if (k === ' ' || k === 'n') callNext();
-  else if (k === 'a') decide('approve');
-  else if (k === 'd') decide('deny');
-  else if (k === 's') suspend();
-  else if (k === 'v' && D.ent && D.ent.canSms && !D.ent.leaving) smsOpen();
-  else if (k === 'e') setInspect(!D.insp.on);
-  else if (k === 'r') openApp('book');
-  else if (k === 'h') openApp('hist');
+  if (D.intro !== null || D.ended) return;
+  if (!quickKeys()) return;
+  if (k === 'tab' || k === 'enter') toggleTrayPin();
+}
+
+// ———————————————————— 暂停 ————————————————————
+
+// 印章台钉住 / 收起（Tab、Enter）：钉子拔掉后，指针不在右边缘就会自动收回
+function toggleTrayPin() {
+  if (D.insp.on) return;
+  const T = D.tray;
+  T.pin = !T.pin;
+  SFX.play(T.pin ? 'select' : 'click', 0.6);
+}
+
+function togglePause() {
+  if (!D || D.ended) return;
+  if (D.paused) resumeShift();
+  else pauseShift();
+}
+
+function pauseShift() {
+  if (D.intro !== null || D.paused) return;
+  D.paused = true;
+  D.pauseAt = now;
+  lastTap.t = -9;
+  // 手头的拖拽在暂停时放开：窗口回到原位，图标回到柜台
+  if (drag) {
+    if (drag.type === 'win') { drag.inst.x = drag.prev[0]; drag.inst.y = drag.prev[1]; delete drag.inst.out; }
+    if (drag.type === 'icon') { delete drag.inst.dx; delete drag.inst.dy; }
+    drag = null;
+  }
+  SFX.play('click');
+}
+
+function resumeShift() {
+  if (!D.paused) return;
+  const dt = now - D.pauseAt;
+  shiftTimes(dt);
+  D.paused = false;
+  lastTap.t = -9;
+  SFX.play('select', 0.6);
+}
+
+// 暂停期间所有时间戳都停住：恢复时整体往后挪 dt，计时、动画、定时器接着走
+function shiftTimes(dt) {
+  if (!(dt > 0)) return;
+  const s = (x) => (typeof x === 'number' ? x + dt : x);
+  D.tStart = s(D.tStart); D.nextArrive = s(D.nextArrive); D.gateT = s(D.gateT);
+  D.tray.last = s(D.tray.last); D.iconT = s(D.iconT);
+  if (D.intro !== null) D.intro = s(D.intro);
+  if (D.toast) D.toast.t = s(D.toast.t);
+  if (D.insp.banner) D.insp.banner.t = s(D.insp.banner.t);
+  if (D.arrest) D.arrest.t0 = s(D.arrest.t0);
+  if (D.ent) { D.ent.t0 = s(D.ent.t0); D.ent.tLeave = s(D.ent.tLeave); }
+  for (const x of D.timers) x.t = s(x.t);
+  for (const x of D.flows) x.t0 = s(x.t0);
+  for (const x of D.lines) x.t = s(x.t);   // D.chat 与 D.lines 是同一批对象，只挪一次
+  for (const p of D.queue) { if (p.t >= 0) p.t = s(p.t); if (p.leave) p.leave = s(p.leave); }
+}
+
+function pauseClick(x, y) {
+  if (inBox(x, y, PAUSE.resume)) return resumeShift();
+  if (inBox(x, y, PAUSE.menu)) {
+    // 保持暂停遮罩一路淡出；D.ended 已经停掉计时与进件
+    D.ended = true;
+    SFX.play('click');
+    fadeGo('title', 0.45);
+  }
 }
 
 function clampDesk(x, y, win) {

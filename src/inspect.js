@@ -55,8 +55,9 @@ function inspectClick(x, y) {
   const f = fieldAt(x, y);
   if (!f) return;
   if (I.sel.some((s) => s.key === f.key)) { I.sel = I.sel.filter((s) => s.key !== f.key); return; }
-  if (I.sel.length >= 2) I.sel = [];
+  // 滑动窗口：已经选了两项时，点第三项会让最早选的那项取消选择
   I.sel.push(f);
+  if (I.sel.length > 2) I.sel.shift();
   SFX.play('select');
   if (I.sel.length < 2) return;
   const keys = I.sel.map((s) => s.key).sort().join('|');
@@ -81,6 +82,7 @@ function askAbout(issue) {
   issueReturnTicket(e);    // 没有凭证时，询问「凭证缺失」之后才派发临时返回页
   say('C', QUESTIONS[issue.type]);
   later(0.9, () => { if (D.ent === e) say('E', issue.ask); });
+  setInspect(false);       // 问完自动退出审查模式，回到桌面继续处理（审查结果留在上方横幅）
 }
 
 // ———————————————————— 验证 SMS ————————————————————

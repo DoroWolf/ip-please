@@ -45,6 +45,13 @@ const fail = (msg, spec = {}) => {
   process.exit(1);
 };
 
+// 無盡模式的世界觀日期：難度 1 是 2078.01.01，難度 2 是 2078.01.02
+{
+  const worldDate = get('worldDate');
+  if (fmtDate(worldDate(1)) !== '2078.01.01') fail(`難度 1 的世界觀日期錯：${fmtDate(worldDate(1))}`, {});
+  if (fmtDate(worldDate(2)) !== '2078.01.02') fail(`難度 2 的世界觀日期錯：${fmtDate(worldDate(2))}`, {});
+}
+
 const stats = { day3: { total: 0, home: 0, foreign: 0, unsupported: 0, voucher: 0, noVoucher: 0, voucherExpired: 0, credExpired: 0, validForeign: 0 }, flaws: {} };
 for (let i = 0; i < 20000; i++) {
   const spec = makeRequest(day(3), 0.45, [], STORY[2]);
@@ -79,11 +86,13 @@ for (let i = 0; i < 20000; i++) {
       if (!voucher) fail('外國請求（非 no_voucher）沒有請求券', spec);
       if (voucher.rows.length !== 1 || voucher.rows[0][0] !== '有效期') fail('請求券只能有有效期一欄', spec);
       if (!spec.checks.has(pairKey('voucher.有效期', 'sys.日期'))) fail('請求券缺少與系統日期的比對關係', spec);
+      if (!spec.checks.has(pairKey('voucher.有效期', 'notice.date'))) fail('請求券缺少與通告日期的比對關係', spec);
       const vd = voucher.rows[0][1];
       if (spec.flaw === 'exp' && spec.issues.some((is) => is.title === '請求券過期' || is.title === '请求券过期')) {
         stats.day3.voucherExpired++;
         if (vd >= today(3)) fail('請求券過期日期不在過去', spec);
         if (!issuesOf(spec, 'voucher.有效期', 'sys.日期').length) fail('請求券過期缺少矛盾', spec);
+        if (!issuesOf(spec, 'voucher.有效期', 'notice.date').length) fail('請求券過期缺少與通告日期的矛盾', spec);
         if (!issuesOf(spec, 'cred.地区', 'rule.voucher').length) fail('請求券過期缺少與請求券條例的矛盾', spec);
       } else if (vd < today(3)) {
         fail('有效請求券的日期在過去', spec);
@@ -104,6 +113,7 @@ for (let i = 0; i < 20000; i++) {
   if (spec.flaw === 'exp') {
     const exp = spec.issues.find((is) => is.title === '证件过期' || is.title === '请求券过期' || is.title === '請求券過期');
     if (!exp) fail('exp 缺少過期矛盾', spec);
+    if (!exp.pairs.some((p) => p.includes('notice.date'))) fail('exp 缺少與通告日期的比對', spec);
     if (spec.issues.some((is) => is.title === '证件过期')) stats.day3.credExpired++;
   }
   if (spec.flaw && !spec.reason) fail('有問題但沒有理由', spec);
@@ -413,12 +423,13 @@ for (let i = 0; i < STORY.length; i++) {
   if (n.pages.length !== 1 + rs.pages.length + 1) fail(`day${i + 1} 通告頁數錯`, {});
   if (126 + n.h > 343) fail(`day${i + 1} 通告太高（${n.h}）`, {});
   if (i === 2 && n.pages[0].h > 217) fail('day3 通告第 1 頁超出桌面', {});
-  // 故事模式的通告第 1 頁一律印憑證簽名
+  // 故事模式的通告第 1 頁一律印憑證簽名；可審查的欄位是公告日期
   if (!rs.sig) fail(`day${i + 1} 憑證應帶簽名`, {});
-  if (!n.pages[0].fields['notice.cred']) fail(`day${i + 1} 通告第 1 頁缺少憑證簽名`, {});
+  if (!n.pages[0].fields['notice.date']) fail(`day${i + 1} 通告第 1 頁缺少公告日期欄`, {});
+  if (n.pages[0].fields['notice.cred']) fail(`day${i + 1} 通告第 1 頁不應再有簽名欄`, {});
 }
 
-// 故事模式：憑證上的簽名是真的，可以拿來和通告第 1 頁的簽名核對；暫時不出簽名造假的題
+// 故事模式：憑證上的簽名是真的，暫時不出簽名造假的題；通告只審查公告日期
 for (let i = 0; i < STORY.length; i++) {
   const rs = STORY[i];
   if (rs.flaws.includes('sig')) fail(`day${i + 1} 暫時不應出簽名造假`, {});
@@ -428,16 +439,65 @@ for (let i = 0; i < STORY.length; i++) {
     if (!cred) fail(`day${i + 1} 沒有憑證`, spec);
     if (!cred.sig) fail(`day${i + 1} 憑證沒有簽名`, spec);
     if (!cred.fields['cred.签名']) fail(`day${i + 1} 憑證簽名不可比對`, spec);
-    if (!spec.checks.has(pairKey('cred.签名', 'notice.cred'))) fail(`day${i + 1} 憑證簽名缺少與通告的比對關係`, spec);
+    if (!spec.checks.has(pairKey('cred.有效期', 'notice.date'))) fail(`day${i + 1} 通告日期缺少與有效期的比對關係`, spec);
+    if (spec.checks.has(pairKey('notice.date', 'sys.日期'))) fail(`day${i + 1} 通告日期不應和系統日期比對`, spec);
+    if (spec.checks.has(pairKey('cred.签名', 'notice.cred'))) fail(`day${i + 1} 簽名不應再和通告比對`, spec);
     if (spec.issues.some((is) => is.type === 'sig' || is.title === '签名不合法')) fail(`day${i + 1} 不應出現簽名矛盾`, spec);
   }
 }
 
-// 通告第 1 頁：印憑證簽發機構的簽名；不再有 notice.tok
+// 通告第 1 頁：可審查的是公告日期（底部的簽名只印不審查）；不再有 notice.cred / notice.tok
 {
   const n = new OfficialNotice(today(1), { body: '測試', sig: true, pages: [], news: null, wanted: [] });
-  if (!n.pages[0].fields['notice.cred']) fail('通告缺少憑證簽名欄', {});
-  if (n.pages[0].fields['notice.tok']) fail('通告不應再有令牌簽名欄', {});
+  const f = n.pages[0].fields;
+  if (!f['notice.date']) fail('通告缺少公告日期欄', {});
+  if (f['notice.cred']) fail('通告不應再有憑證簽名欄', {});
+  if (f['notice.tok']) fail('通告不應再有令牌簽名欄', {});
+  const b = f['notice.date'];
+  if (!b || b[0] < 0 || b[2] > n.w || b[1] < TITLE_H) fail('通告日期欄位位置錯', {});
+  if (b[2] - b[0] > tw(today(1), 8) + 4) fail('通告日期欄位應只框日期本身', {});
+}
+
+// 通告只有第 1 頁印「安全归于ANTHROTZKA」；附頁與特別關注對象頁都不再印
+{
+  const motto = '安全归于ANTHROTZKA';
+  const has = (pg) => pg.lines.some((l) => l.s === motto);
+  const n = new OfficialNotice(today(1), {
+    body: '測試', sig: true, pages: [{ head: '附頁', body: '測試' }], news: null, wanted: ['w0', 'w1', 'w2'],
+  });
+  if (!has(n.pages[0])) fail('通告第 1 頁應保留「安全归于ANTHROTZKA」', {});
+  for (let i = 1; i < n.pages.length; i++) if (has(n.pages[i])) fail(`通告第 ${i + 1} 頁不應再印「安全归于ANTHROTZKA」`, {});
+}
+
+// 通告日期也能核對簽發日期（和系統日期一樣）：合規的簽發日期是「無矛盾」，未來的簽發日期是矛盾
+{
+  let ok = 0, future = null;
+  for (let i = 0; i < 6000 && !(ok && future); i++) {
+    const s = makeRequest(day(1), 0.45, [], FULL_RULES);
+    if (s.flaw === 'future') { future = s; continue; }
+    const tok = s.docs.find((d) => d.key === 'tok');
+    if (!s.flaw && tok && tok.fields['tok.签发']) {
+      if (!s.checks.has(pairKey('tok.签发', 'notice.date'))) fail('令牌簽發日期缺少與通告日期的比對關係', s);
+      ok++;
+    }
+  }
+  if (!ok) fail('找不到合規的令牌簽發日期樣本', {});
+  if (!future) fail('找不到簽發日期未到的樣本', {});
+  else if (!issuesOf(future, 'tok.签发', 'notice.date').length) fail('future 缺少與通告日期的矛盾', future);
+}
+
+// 手册底部书签栏是隐藏的布尔开关：无尽模式打开，故事模式停用（之后随剧情开放）
+{
+  const on = new Rulebook(FULL_RULES);
+  const off = new Rulebook(FULL_RULES, { marksOn: false });
+  if (!on.marksOn) fail('無盡模式手冊應顯示書籤欄', {});
+  if (off.marksOn) fail('書籤開關沒有關掉', {});
+  const m = on.marks[1];
+  const c = [(m.box[0] + m.box[2]) / 2, (m.box[1] + m.box[3]) / 2];
+  off.page = 0;
+  if (off.press(...c) || off.page !== 0) fail('書籤欄關掉後仍能點書籤跳頁', {});
+  on.page = 0;
+  if (!on.press(...c) || on.page === 0) fail('書籤欄打開時點書籤應跳頁', {});
 }
 
 // 手冊 / 通告的標題列翻頁列：◀ 上一頁、▶ 下一頁，兩邊都要能點且可循環
@@ -482,6 +542,155 @@ if (d.fields['voucher.有效期'][1] <= TITLE_H + 4) fail('請求券有效期應
   if (f[3] <= doc.fields['tok.IP'][3]) fail('請求摘要欄位應涵蓋折行後的高度', {});
   if (doc.h <= new Doc('tok', [['IP', '10.0.0.1']], null).h) fail('請求摘要應讓令牌視窗變高', {});
   if (doc.rows[doc.rows.length - 1][0] !== '请求') fail('請求摘要應是令牌最後一欄', {});
+}
+
+// ———— 無盡模式難度 2：環境信息卡與企業授權 ————
+const FULL_RULES_2 = get('FULL_RULES_2');
+const ENDLESS_RULES = get('ENDLESS_RULES');
+const CORPS = get('CORPS');
+const HOST_CORP = get('HOST_CORP');
+if (ENDLESS_RULES[0] !== FULL_RULES || ENDLESS_RULES[1] !== FULL_RULES_2) fail('ENDLESS_RULES 應依難度排列', {});
+if (CORPS.map((c) => c.name).join(',') !== 'OpenMind,Anthrotzka,Googol,yAI,Mistrain,DeepThink') fail('支援企業名單錯', {});
+for (const c of CORPS) {
+  if (!REGION_LOCALE[c.region]) fail(`企業所在地區沒有語言 / 時區：${c.name}`, {});
+  const pat = c.icon.pat;
+  if (pat.length !== 11 || pat.some((r) => r.length !== 11)) fail(`企業圖示應為 11×11：${c.name}`, {});
+  if (pat.some((r) => [...r].some((ch) => ch !== '.' && !c.icon.cols[ch]))) fail(`企業圖示有沒定義顏色的像素：${c.name}`, {});
+}
+// 難度 1 不受影響：沒有環境信息卡與企業授權
+for (let i = 0; i < 3000; i++) {
+  const spec = makeRequest(day(1), 0.6, [], FULL_RULES);
+  if (spec.ent || spec.docs.some((d) => d.key === 'env' || d.key === 'ent')) fail('難度 1 不應出環境信息卡或企業授權', spec);
+  if (['no_env', 'ent_auth', 'ent_acct'].includes(spec.flaw)) fail('難度 1 不應出難度 2 的問題', spec);
+}
+{
+  const ENT_FLAWS = [null, 'wanted', 'photo', 'ip', 'exp', 'sig', 'ent_auth', 'ent_acct'];
+  const seen = { ent: 0, env: 0, noEnv: 0, envTz: 0, entAuth: 0, entAcct: 0, deep: 0, entIp: 0 };
+  const wantedAv = get('ASSETS').avatars.slice(0, 3);
+  for (let i = 0; i < 40000; i++) {
+    const spec = makeRequest(day(1), 0.5, wantedAv, FULL_RULES_2);
+    const by = Object.fromEntries(spec.docs.map((d) => [d.key, d]));
+    if (spec.flaw && !spec.reason) fail('難度 2 有問題但沒有理由', spec);
+    // 審查窗的請求類型：企業請求一律「企业请求」
+    const typeLabel = spec.ent ? '企业请求' : spec.kind === 'api' ? 'API 调用' : '对话';
+    if (spec.typeLabel !== typeLabel) fail(`請求類型標籤錯：${spec.typeLabel}`, spec);
+    if (spec.ent) {
+      seen.ent++;
+      const corp = CORPS.find((c) => c.key === spec.ent);
+      // 企業帳戶只出示憑證和企業授權
+      if (Object.keys(by).sort().join(',') !== 'cred,ent') fail('企業帳戶只應有憑證和企業授權', spec);
+      if (spec.kind !== 'chat') fail('企業帳戶應是對話請求', spec);
+      // 企業請求不顯示請求概述，本人也不會說明來意
+      if (spec.task || spec.taskOnTok) fail('企業請求不應顯示請求概述', spec);
+      if (!ENT_FLAWS.includes(spec.flaw)) fail(`企業帳戶不應出 ${spec.flaw}`, spec);
+      const region = by.cred.rows.find((r) => r[0] === '地区')[1];
+      if (region !== corp.region) fail('企業帳戶的憑證地區應為企業所在地區', spec);
+      const ent = by.ent, rows = Object.fromEntries(ent.rows);
+      if (ent.rows.map((r) => r[0]).join(',') !== '账号,IP,授权企业') fail('企業授權欄位應為 帳號 / IP / 授權企業', spec);
+      if (ent.corp !== spec.ent) fail('企業授權缺少簽發企業', spec);
+      for (const f of ['ent.企业', 'ent.账号', 'ent.IP', 'ent.授权企业']) if (!ent.fields[f]) fail(`企業授權缺少欄位 ${f}`, spec);
+      if (ent.fields['ent.企业'][3] >= ent.fields['ent.账号'][1] + 2) fail('企業橫幅不應壓到帳號欄', spec);
+      const list = rows.授权企业.split(', ');
+      // 簽發企業自己不列；Anthrotzka 簽發的授權仍要列出 Anthrotzka 才有效
+      if (corp.name !== HOST_CORP && list.includes(corp.name)) fail('授權企業不應列出簽發企業自己', spec);
+      if (new Set(list).size !== list.length) fail('授權企業不應重複', spec);
+      if (!list.every((n) => CORPS.some((c) => c.name === n))) fail('授權企業應來自支援企業', spec);
+      // DeepThink 的企業授權必定不含 Anthrotzka：一律企業授權無效
+      if (corp.key === 'deepthink') {
+        seen.deep++;
+        if (spec.flaw !== 'ent_auth') fail('DeepThink 的企業授權必定無效', spec);
+        if (list.includes(HOST_CORP)) fail('DeepThink 的授權企業不應包含 Anthrotzka', spec);
+      }
+      for (const p of [['ent.企业', 'book.ent'], ['ent.企业', 'cred.地区'], ['ent.授权企业', 'rule.ent'], ['ent.IP', 'rv.IP'], ['rv.柜台', 'rule.ent']]) {
+        if (!spec.checks.has(pairKey(...p))) fail(`企業授權缺少比對關係 ${p}`, spec);
+      }
+      const docsNote = spec.notes.get(pairKey('rv.柜台', 'rule.docs'));
+      if (!docsNote || docsNote.title !== '企业账户') fail('企業帳戶應注明不需令牌與環境信息卡', spec);
+      if (spec.flaw === 'ent_auth') {
+        seen.entAuth++;
+        if (list.includes(HOST_CORP)) fail('ent_auth 的授權企業不應包含 Anthrotzka', spec);
+        if (corp.name === HOST_CORP) fail('ent_auth 不應由 Anthrotzka 簽發', spec);
+        if (!issuesOf(spec, 'ent.授权企业', 'rule.ent').length) fail('ent_auth 缺少矛盾', spec);
+        const supported = FULL_RULES_2.regions.includes(region);
+        if (!supported && !issuesOf(spec, 'cred.地区', 'rule.region').length) fail('授權無效時不支援地區應是矛盾', spec);
+      } else {
+        if (!list.includes(HOST_CORP)) fail('有效的企業授權應包含 Anthrotzka', spec);
+        if (!spec.checks.has(pairKey('ent.账号', 'cred.昵称'))) fail('企業授權帳號缺少與憑證暱稱的比對', spec);
+        // DeepThink 一律 ent_auth，所以有效授權的簽發企業一定在支援地區
+        if (!FULL_RULES_2.regions.includes(region)) fail('有效的企業授權不應來自不支援地區', spec);
+        if (issuesOf(spec, 'cred.地区', 'rule.region').length) fail('企業帳戶不應有地區矛盾', spec);
+        if (issuesOf(spec, 'ent.授权企业', 'rule.ent').length) fail('有效的企業授權不應有授權企業矛盾', spec);
+      }
+      if (spec.flaw === 'ent_acct') {
+        seen.entAcct++;
+        if (rows.账号 === spec.handle) fail('ent_acct 的帳號應與本人不同', spec);
+        if (!issuesOf(spec, 'ent.账号', 'cred.昵称').length || !issuesOf(spec, 'ent.账号', 'rv.昵称').length) fail('ent_acct 缺少矛盾', spec);
+      } else if (rows.账号 !== spec.handle) fail('企業授權帳號應是本人', spec);
+      if (spec.flaw === 'ip' && rows.IP !== spec.ip) seen.entIp++;
+      continue;
+    }
+    // 一般請求：令牌 + 環境信息卡
+    if (spec.flaw === 'no_env') {
+      seen.noEnv++;
+      if (by.env) fail('no_env 不應有環境信息卡', spec);
+      if (!issuesOf(spec, 'rv.柜台', 'rule.docs').length) fail('no_env 缺少矛盾', spec);
+      continue;
+    }
+    if (!by.env && spec.flaw !== 'no_cred') fail('難度 2 一般請求應有環境信息卡', spec);
+    if (!by.env) continue;
+    seen.env++;
+    const env = Object.fromEntries(by.env.rows);
+    if (by.env.rows.map((r) => r[0]).join(',') !== '时区,系统,屏幕') fail('環境信息卡欄位錯', spec);
+    if (by.env.sig || by.env.fields['env.签名']) fail('環境信息卡不應有簽名', spec);
+    if (by.tok && Object.fromEntries(by.tok.rows).时区) fail('時區應印在環境信息卡、不在令牌上', spec);
+    if (!by.cred) continue;
+    const region = by.cred.rows.find((r) => r[0] === '地区')[1];
+    for (const o of ['cred.地区', 'rule.locale', 'rule.region']) {
+      if (!spec.checks.has(pairKey('env.时区', o))) fail(`環境信息卡時區缺少與 ${o} 的比對`, spec);
+    }
+    const tzIssue = issuesOf(spec, 'env.时区', 'cred.地区');
+    if (tzIssue.length) {
+      seen.envTz++;
+      if (spec.flaw !== 'locale' || env.时区 === REGION_LOCALE[region][1]) fail('時區矛盾應是 locale 問題', spec);
+      if (!SUSPEND_FLAWS.includes(spec.flaw)) fail('時區不符應可拘留', spec);
+    } else if (env.时区 !== REGION_LOCALE[region][1]) fail('合規的環境信息卡時區應與憑證地區一致', spec);
+  }
+  for (const [k, v] of Object.entries(seen)) if (!v) fail(`難度 2 應會出現：${k}`, {});
+  if (!SUSPEND_FLAWS.includes('ent_acct') || SUSPEND_FLAWS.includes('ent_auth') || SUSPEND_FLAWS.includes('no_env')) fail('難度 2 的拘留範圍錯', {});
+  stats.diff2 = seen;
+}
+// 難度 2 的手冊：條例寫回「語言和時區」、支持地區列出時區、多一章企業名錄（含六家企業與圖示）
+{
+  const rb = new Rulebook(FULL_RULES_2);
+  const texts = rb.pages.flatMap((p) => p.rows.map((r) => r.s));
+  for (const s of ['每个请求须出示凭证、令牌和环境信息卡', '语言和时区须与地区一致', `企业账户须出示凭证和含 ${HOST_CORP} 的企业授权`, '时区', 'UTC-05:00', '四、企业名录']) {
+    if (!texts.includes(s)) fail(`難度 2 手冊缺少：${s}`, {});
+  }
+  if (!rb.pages.some((p) => p.fields['rule.ent'])) fail('難度 2 手冊缺少企業授權條例欄位', {});
+  if (rb.pages.some((p) => p.fields['rule.entco'])) fail('難度 2 手冊不應再有獨立的授權企業條例', {});
+  const entPage = rb.pages.find((p) => p.fields['book.ent']);
+  if (!entPage) fail('難度 2 手冊缺少企業名錄欄位', {});
+  if (entPage.rows.filter((r) => r.icon).length !== CORPS.length) fail('企業名錄應畫出每家企業的圖示', {});
+  for (const c of CORPS) if (!entPage.rows.some((r) => r.s === c.name) || !entPage.rows.some((r) => r.s === c.region)) fail(`企業名錄缺少 ${c.name}`, {});
+  if (!rb.marks.some((m) => m.label === '企业' && rb.pages[m.page] === entPage)) fail('手冊缺少企業書籤', {});
+  for (const p of rb.pages) for (const r of p.rows) if (r.y + 8 > rb.h - 14) fail(`難度 2 手冊文字壓到書籤列（y=${r.y}）`, {});
+  // 難度 1 的手冊不變：沒有企業名錄
+  if (new Rulebook(FULL_RULES).pages.some((p) => p.fields['book.ent'])) fail('難度 1 手冊不應有企業名錄', {});
+}
+// 企業授權視窗：「授權企業」標籤較長，值往右讓開；長名單要折行而且不超出視窗
+{
+  const long = 'OpenMind, Googol, Anthrotzka';
+  const doc = new Doc('ent', [['账号', 'k.tanaka'], ['IP', '203.0.113.7'], ['授权企业', long, true]], null);
+  doc.corp = 'deepthink';
+  if (doc.kx < tw('授权企业', 8) + 6) fail('企業授權的值會壓到標籤', {});
+  if (!doc.wraps[2] || doc.wraps[2].length < 2) fail('長授權企業名單應折行', {});
+  if (doc.wraps[2].some((s) => doc.vx + doc.kx + tw(s, 10) > doc.w - 3)) fail('授權企業名單超出視窗', {});
+  if (doc.fields['ent.账号'][1] <= TITLE_H + 30) fail('企業授權欄位應排在橫幅下方', {});
+  // 其他證件的值欄位置不變
+  if (new Doc('tok', [['运营商', '纽约 · ANTHROTZKA']], null).kx !== 34) fail('令牌值欄位置不應改變', {});
+}
+for (const ch of '环境信息卡企业授权账号名录所在地区难度新增×') {
+  for (const s of [8, 10, 12]) if (!get('ASSETS').font[s][ch]) fail(`缺少字形（${s}px）：${ch}`, {});
 }
 
 console.log('OK');

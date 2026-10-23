@@ -16,13 +16,24 @@ function drawDesk() {
   if (drag && drag.type === 'win' && drag.inst.out && (drag.inst.kind === 'doc' || drag.inst.kind === 'smsf')) docIcon(ptr.x - 8, ptr.y - 6, true);
   if (D.intro !== null) drawIntro();
   scanlines(0, 0, W - 1, H - 1, 0.12);
+  if (D.paused) drawPause();
+}
+
+// 暂停界面：只有继续和主菜单两个按钮
+function drawPause() {
+  darken(0.72);
+  const [x0, y0, x1, y1] = PAUSE.panel;
+  frame(x0, y0, x1, y1, K.CYAN_L, K.INK);
+  bigText(W / 2, y0 + 14, '暂停', 12, 2, K.WHITE);
+  button(PAUSE.resume, '继续', K.CYAN, { size: 12 });
+  button(PAUSE.menu, '主菜单', K.DIM, { size: 12 });
 }
 
 function drawHud() {
   rect(...HUD, K.PANEL);
   rect(0, 13, W - 1, 13, K.LINE);
   txt(6, 3, 'IP, PLEASE', 8, K.CLAUDE_L);
-  txt(62, 3, RUN.mode === 'story' ? `· ${mode().name}` : `· 无尽 - ${mode().name}`, 8, K.CYAN);
+  txt(62, 3, RUN.mode === 'story' ? `· ${mode().name}` : `无尽 - ${mode().name}`, 8, K.CYAN);
   const parts = [];
   if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`已审核 ${RUN.processed}`, K.GREEN]);
   if (RUN.mode === 'perfect') parts.push([`用时 ${mmss(elapsed())}`, K.WHITE], [`得分 ${RUN.score}`, K.GREEN]);
@@ -99,6 +110,8 @@ function drawPipe() {
 }
 
 // —— 左下：审查窗 ——
+// 柜台图标下的短名：证件名太长的换成简称（图标间距只有 32px）
+const ICON_LABELS = { api: 'API', return: '返回票', env: '环境卡', ent: '企业' };
 function drawReview() {
   const [x0, y0, x1, y1] = REVIEW;
   rect(x0, y0, x1, y1, K.BG);
@@ -119,7 +132,7 @@ function drawReview() {
   // 接入者信息
   const ready = avatarReady(e);
   const s = e && e.spec;
-  [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && (s.kind === 'api' ? 'API 调用' : '对话')]].forEach(([k, v], i) => {
+  [['IP', s && s.ip], ['昵称', s && s.handle], ['类型', s && s.typeLabel]].forEach(([k, v], i) => {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
     txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? K.TEXT : K.DIM_D);
   });
@@ -144,10 +157,40 @@ function drawReview() {
     if (e.measureUsed || smsOk) button(NEXT_BTN, '验证SMS', K.GREEN, { size: 8, off: true });
     else button(NEXT_BTN, '拘留', K.RED, { off: true });
   } else button(NEXT_BTN, '下一位', K.CYAN, { off: !canCall, hot: canCall && !D.hinted.next && Math.floor(now * 2) % 2 === 0 });
+  // 柜台上的证件：多了就左右滚动；绘制裁在柜台内，左右边缘放滚动箭头
+  clipCounter();
   for (const ic of D.icons) {
     if (drag && drag.inst === ic && drag.moved) continue;
-    docIcon(ic.x, ic.y, ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)));
-    txt(ic.x + 13, ic.y + 22, ic.win.key === 'api' ? 'API' : ic.win.key === 'return' ? '返回票' : ic.win.title, 8, K.DIM, 'ma');
+    const on = ptr.mouse && inBox(ptr.x, ptr.y, iconBox(ic)) && inBox(ptr.x, ptr.y, COUNTER_BOX);
+    docIcon(ic.x, ic.y, on);
+    txt(ic.x + 13, ic.y + 22, ICON_LABELS[ic.win.key] || ic.win.title, 8, K.DIM, 'ma');
+  }
+  drawCounterArrows();
+  G.restore();
+}
+
+function clipCounter() {
+  G.save();
+  G.beginPath();
+  G.rect(COUNTER_BOX[0], COUNTER_BOX[1], COUNTER_BOX[2] - COUNTER_BOX[0] + 1, COUNTER_BOX[3] - COUNTER_BOX[1] + 1);
+  G.clip();
+}
+
+// 柜台左右边缘的滚动箭头：指针贴到哪边，哪边的箭头亮起（同时自动滚动）
+function drawCounterArrows() {
+  const max = iconMaxScroll();
+  if (!max) return;
+  const y = ICON_Y + 4;
+  const onY = ptr.y >= COUNTER_BOX[1] && ptr.y <= COUNTER_BOX[3];
+  const onL = onY && ptr.x >= COUNTER_BOX[0] && ptr.x <= COUNTER_BOX[0] + COUNTER_EDGE;
+  const onR = onY && ptr.x >= COUNTER_BOX[2] - COUNTER_EDGE && ptr.x <= COUNTER_BOX[2];
+  if (D.iconScroll > 0) {
+    rect(COUNTER_BOX[0], COUNTER_BOX[1], COUNTER_BOX[0] + 6, COUNTER_BOX[3], K.BG);
+    txt(COUNTER_BOX[0] + 1, y, '◀', 8, onL ? K.AMBER : K.CYAN);
+  }
+  if (D.iconScroll < max) {
+    rect(COUNTER_BOX[2] - 6, COUNTER_BOX[1], COUNTER_BOX[2], COUNTER_BOX[3], K.BG);
+    txt(COUNTER_BOX[2] - 1, y, '▶', 8, onR ? K.AMBER : K.CYAN, 'ra');
   }
 }
 
@@ -313,7 +356,7 @@ function drawInspect() {
     const [a, b] = D.insp.sel.map((s) => center(s.box));
     line(a[0], a[1], b[0], b[1], K.AMBER);
   }
-  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '审查：依次点两项信息；再点『审查』图标退出', 8, K.AMBER);
+  txt(SCREEN[0] + 6, TASKBAR[1] - 12, '点击不符事项', 8, K.AMBER);
 }
 
 function topWinAt([x, y]) {

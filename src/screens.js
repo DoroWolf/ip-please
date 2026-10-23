@@ -7,19 +7,24 @@ function loadRecords() {
   try { return JSON.parse(localStorage.getItem(RECORD_KEY) || '{}'); } catch (e) { return {}; }
 }
 
-// 各模式只记最好成绩：限时 / 完美 / 耐力 = 分数，故事 = 天数
+// 纪录的键：难度 1 沿用原来的模式名（旧纪录照样有效），更高难度另存一份
+const recordKey = (m, diff = 1) => (m === 'story' || diff <= 1 ? m : `${m}@${diff}`);
+
+// 各模式只记最好成绩：限时 / 完美 / 耐力 = 分数（每个难度各一份），故事 = 天数
 function saveRecord() {
   const r = loadRecords();
+  const key = recordKey(RUN.mode, RUN.diff);
   const v = RUN.mode === 'story' ? RUN.day : RUN.score;
-  RUN.best = r[RUN.mode] || 0;
+  RUN.best = r[key] || 0;
   RUN.newBest = v > RUN.best;
   if (RUN.newBest) {
-    r[RUN.mode] = v;
+    r[key] = v;
     try { localStorage.setItem(RECORD_KEY, JSON.stringify(r)); } catch (e) { /* 隐私模式等：存不了就算了 */ }
   }
 }
 
-const recordLabel = (m, v) => (m === 'story' ? `最佳：撑到 DAY ${v}` : `最佳：${v} ${m === 'endure' ? 'token' : '分'}`);
+// 三种无尽模式的纪录统一用「分」，故事模式记撑到第几天
+const recordLabel = (m, v) => (m === 'story' ? `最佳：撑到 DAY ${v}` : `最佳：${v} 分`);
 
 // ———————————————————— 开机 ————————————————————
 
@@ -70,22 +75,54 @@ function bootSounds() {
 
 // 首页只放上下两排简约按钮：故事模式 / 无尽模式；点故事模式进时间线选日，点无尽模式再选限时 / 完美 / 耐力
 const TITLE_BTNS = { story: [220, 168, 420, 204], endless: [220, 218, 420, 254] };
-const ENDLESS_CARDS = { timed: [40, 150, 220, 300], perfect: [230, 150, 410, 300], endure: [420, 150, 600, 300] };
+// 无尽模式那一页不画标题：三张玩法卡放上面，难度（含证件说明）放下面，选好后点『确定』开局
+const ENDLESS_CARDS = { timed: [40, 54, 220, 204], perfect: [230, 54, 410, 204], endure: [420, 54, 600, 204] };
 const BACK_BTN = [40, 116, 110, 138];
+const ENDLESS_BACK_BTN = [40, 20, 110, 42];
+// 无尽模式的难度：玩法卡下面一排，证件说明直接写在按钮里。
+// 未来一共四档难度：这一排按四格（DIFF_SLOTS）预留，往 DIFFS 加档位就会自动均分同一排的宽度
+const DIFF_SLOTS = 4;
+const DIFF_GAP = 8, DIFF_TOP = 214, DIFF_H = 54;
+const DIFF_N = Math.min(DIFFS.length, DIFF_SLOTS);
+const DIFF_W = Math.floor((W - 40 * 2 - DIFF_GAP * (DIFF_N - 1)) / DIFF_N);
+const DIFF_BTNS = DIFFS.map((_, i) => {
+  const x0 = Math.round((W - (DIFF_N * DIFF_W + (DIFF_N - 1) * DIFF_GAP)) / 2);
+  const x = x0 + i * (DIFF_W + DIFF_GAP);
+  return [x, DIFF_TOP, x + DIFF_W, DIFF_TOP + DIFF_H];
+});
+// 确定按钮贴在页面底部（无尽模式页不画操作提示与版权行）
+const CONFIRM_BTN = [220, 300, 420, 340];
 const DAYS_PANEL = [70, 150, 570, 300];
 let titleTab = 'top';   // 'top' 首页 / 'days' 故事模式选日 / 'endless' 无尽模式的三种玩法
+let endlessDiff = 1;    // 无尽模式选中的难度（这次打开页面期间记住）
+let endlessPick = null; // 无尽模式选中的玩法：点『确定』才开局
 let dayNodes = [];      // 时间线上每一天的点击框（drawStoryDays 每帧重算）
 
-function modeCard(box, M, rec) {
+function modeCard(box, M, rec, sel = false) {
   const hover = ptr.mouse && inBox(ptr.x, ptr.y, box);
-  const col = hover ? K.CYAN_L : K.CYAN_D;
-  frame(...box, col, hover ? K.PANEL_L : K.PANEL);
+  const on = hover || sel;
+  const col = on ? K.CYAN_L : K.CYAN_D;
+  frame(...box, col, on ? K.PANEL_L : K.PANEL);
+  if (sel) outline(box[0] + 3, box[1] + 3, box[2] - 3, box[3] - 3, K.CYAN_D);
   const cx = (box[0] + box[2]) >> 1;
-  txt(cx, box[1] + 14, M.en, 8, hover ? K.CYAN_L : K.DIM, 'ma');
-  bigText(cx, box[1] + 30, M.name, 12, 2, hover ? K.WHITE : K.TEXT);
+  txt(cx, box[1] + 14, M.en, 8, on ? K.CYAN_L : K.DIM, 'ma');
+  bigText(cx, box[1] + 30, M.name, 12, 2, on ? K.WHITE : K.TEXT);
   M.desc.forEach((s, i) => wrap(s, 8, box[2] - box[0] - 20).forEach((ln, j) =>
     txt(cx, box[1] + 72 + (i * 2 + j) * 12, ln, 8, K.TEXT, 'ma')));
   if (rec !== undefined) txt(cx, box[3] - 18, rec ? recordLabel(M.key, rec) : '尚无记录', 8, rec ? K.AMBER : K.DIM_D, 'ma');
+}
+
+// 难度按钮：上半是难度名，下半是这一档的证件说明；选中的那档亮起
+function diffButton(box, D, sel) {
+  const hover = ptr.mouse && inBox(ptr.x, ptr.y, box);
+  const col = sel ? K.CYAN_L : K.DIM;
+  frame(...box, col, hover || sel ? rgba(parseRgb(col), 0.28) : K.PANEL);
+  const cx = (box[0] + box[2]) >> 1;
+  txt(cx, box[1] + 8, D.name, 10, hover || sel ? K.WHITE : K.DIM, 'ma');
+  // 说明太长时折行（四档并排时每格较窄）；按钮高度按两行预留
+  const lines = wrap(D.desc, 8, box[2] - box[0] - 12);
+  const dy = box[1] + (lines.length > 1 ? 26 : 30);
+  lines.forEach((ln, i) => txt(cx, dy + i * 12, ln, 8, sel ? K.CYAN : K.DIM_D, 'ma'));
 }
 
 // 故事模式的时间线选日：所有天数都能直接选，到达过的天数会亮起；滑到某天时显示当天报纸标题
@@ -133,8 +170,11 @@ function drawStoryDays(rec) {
 function drawTitle(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
   for (let x = 8; x < W; x += 16) for (let y = 8; y < H; y += 16) pt(x, y, K.LINE);
-  spr('title_emblem', 297, 18);
-  bigText(W / 2, 74, 'IP, PLEASE', 12, 4, K.WHITE, K.INK);
+  // 无尽模式那一页不放标题：把上方整块让给玩法卡
+  if (titleTab !== 'endless') {
+    spr('title_emblem', 297, 18);
+    bigText(W / 2, 74, 'IP, PLEASE', 12, 4, K.WHITE, K.INK);
+  }
   if (t < 0.4) return;
   const rec = loadRecords();
   if (titleTab === 'top') {
@@ -144,17 +184,22 @@ function drawTitle(t) {
     drawStoryDays(rec.story || 0);
     button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
   } else {
-    for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[m] || 0);
-    button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
+    for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[recordKey(m, endlessDiff)] || 0, m === endlessPick);
+    button(ENDLESS_BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
+    DIFFS.forEach((d, i) => diffButton(DIFF_BTNS[i], d, i + 1 === endlessDiff));
+    button(CONFIRM_BTN, '确定 ▶', K.CYAN, { size: 12, off: !endlessPick });
   }
-  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拒绝  E 审查  R 手册  空格 下一位', 8, K.DIM, 'ma');
-  txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
+  // 无尽模式页把底部整块留给『确定』，不画操作提示与版权行
+  if (titleTab !== 'endless') {
+    txt(W / 2, 318, '鼠标或手指操作 · Esc 暂停 · 无尽模式：Tab / Enter 印章台、快速双击审查', 8, K.DIM, 'ma');
+    txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
+  }
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }
 
 function startMode(m) {
   SFX.play('accept');
-  newRun(m);
+  newRun(m, m === 'story' ? 1 : endlessDiff);
   fadeGo(m === 'story' ? 'daycard' : 'desk');
 }
 
@@ -171,17 +216,21 @@ function titleClick(x, y) {
   if (st() < 0.4) return;
   if (titleTab === 'top') {
     if (inBox(x, y, TITLE_BTNS.story)) { titleTab = 'days'; dayNodes = []; SFX.play('select'); }
-    else if (inBox(x, y, TITLE_BTNS.endless)) { titleTab = 'endless'; SFX.play('select'); }
+    else if (inBox(x, y, TITLE_BTNS.endless)) { titleTab = 'endless'; endlessPick = null; SFX.play('select'); }
     return;
   }
-  if (inBox(x, y, BACK_BTN)) { titleTab = 'top'; dayNodes = []; SFX.play('click'); return; }
   if (titleTab === 'days') {
+    if (inBox(x, y, BACK_BTN)) { titleTab = 'top'; dayNodes = []; SFX.play('click'); return; }
     const i = dayNodes.findIndex((b) => inBox(x, y, b));
     if (i >= 0) startStoryDay(i + 1);
     return;
   }
+  if (inBox(x, y, ENDLESS_BACK_BTN)) { titleTab = 'top'; endlessPick = null; SFX.play('click'); return; }
+  const di = DIFF_BTNS.findIndex((b) => inBox(x, y, b));
+  if (di >= 0) { if (endlessDiff !== di + 1) { endlessDiff = di + 1; SFX.play('select'); } return; }
   const m = Object.keys(ENDLESS_CARDS).find((k) => inBox(x, y, ENDLESS_CARDS[k]));
-  if (m) startMode(m);
+  if (m) { if (endlessPick !== m) { endlessPick = m; SFX.play('select'); } return; }
+  if (inBox(x, y, CONFIRM_BTN) && endlessPick) startMode(endlessPick);
 }
 
 // ———————————————————— 故事模式：日期卡 ————————————————————
@@ -353,27 +402,28 @@ function drawResult(t) {
   const m = RUN.mode;
   // 三种无尽模式统一用「游戏结束」；故事模式停机，或者撑过了已有的全部天数（未完待续）
   const title = m !== 'story' ? '游戏结束' : '未完待续';
-  bigText(W / 2, 40, title, 12, 3, RUN.fail ? K.RED : K.CYAN_L);
+  // 结算标题一律青色：失败也不换成红字（故事模式的停机原因另外用红字列出）
+  bigText(W / 2, 40, title, 12, 3, K.CYAN_L);
   if (t < 0.5) return;
   let y = 100;
   const row = (a, b, col = K.WHITE) => { txt(220, y, a, 12, K.DIM); txt(420, y, b, 12, col, 'ra'); y += 18; };
   // 结算只显示该模式该看的东西：限时看分数；完美 / 耐力看用时和分数
   if (m === 'timed') row('得分', `${RUN.score}`, K.CLAUDE_L);
   if (m === 'perfect') { row('用时', mmss(RUN.time), K.WHITE); row('得分', `${RUN.score}`, K.CLAUDE_L); }
-  if (m === 'endure') { row('用时', mmss(RUN.time), K.WHITE); row('最高 token', `${RUN.score}`, K.CLAUDE_L); }
+  if (m === 'endure') { row('用时', mmss(RUN.time), K.WHITE); row('最高得分', `${RUN.score}`, K.CLAUDE_L); }
   if (m === 'story') { row('坚持天数', `${RUN.day}`, K.CLAUDE_L); row('累计正确', `${RUN.correct}`, K.GREEN); row('累计事故', `${RUN.incidents}`); }
   // 完美 / 耐力不显示事故原因的红字；故事模式的停机原因保留
   if (m === 'story' && RUN.fail) { y += 6; RUN.fail.forEach((s) => { txt(W / 2, y, s, 10, K.RED, 'ma'); y += 14; }); }
   if (t > 1.0) {
     if (RUN.newBest || RUN.best) txt(W / 2, 262, RUN.newBest ? '新纪录！' : recordLabel(m, RUN.best), 12, RUN.newBest ? K.AMBER : K.DIM, 'ma');
     button(RESTART_BTN, '再来一局', K.CYAN);
-    button(MENU_BTN, '返回标题', K.DIM);
+    button(MENU_BTN, '主菜单', K.DIM);
   }
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }
 
 function resultClick(x, y) {
   if (st() < 1.0) return;
-  if (inBox(x, y, RESTART_BTN)) { const m = RUN.mode; newRun(m); fadeGo(m === 'story' ? 'daycard' : 'desk'); }
+  if (inBox(x, y, RESTART_BTN)) { const m = RUN.mode; newRun(m, RUN.diff); fadeGo(m === 'story' ? 'daycard' : 'desk'); }
   if (inBox(x, y, MENU_BTN)) { titleTab = RUN.mode === 'story' ? 'top' : 'endless'; fadeGo('title'); }
 }

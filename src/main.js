@@ -4,20 +4,25 @@
 function go(name) {
   scene = name; sceneT0 = now;
   lastKey = -1;
-  if (name !== 'title' && titleMusic) { SFX.stop(titleMusic); titleMusic = null; }
+  sceneMusic();
   SFX.ambient(name === 'desk');
-  if (name === 'title') titleMusic = SFX.play('title', 0.6);
   if (name === 'daycard') SFX.play('day_hit');
   if (name === 'news') SFX.play('whoosh');
-  if (name === 'summary') { SFX.play('sad', 0.8); initSummary(); }
-  if (name === 'result') SFX.play(RUN.fail ? 'sad' : 'end', 0.8);
+  if (name === 'summary') initSummary();
   if (name === 'desk') startShift();
+}
+
+// 场景配乐：同一时间只播一首，换场时由 SFX 淡出旧曲 / 淡入新曲（不会硬切）。
+// 三种无尽模式的结算统一用结束曲，不播坏结局的曲子；故事模式的停机才播 sad。
+function sceneMusic() {
+  if (scene === 'title') SFX.music('title', 0.6);
+  else if (scene === 'summary') SFX.music('sad', 0.8);
+  else if (scene === 'result') SFX.music(RUN.mode === 'story' && RUN.fail ? 'sad' : 'end', 0.8);
+  else SFX.stopMusic();
 }
 
 // 黑屏转场：先压黑，再切场景；inDur > 0 时切完从全黑淡回来
 let fade = null;
-// 标题画面的一次性背景音乐：进入游戏后要停掉
-let titleMusic = null;
 function fadeGo(name, dur = 0.45, inDur = 0) {
   if (!fade) fade = { t0: now, to: name, dur, inDur };
 }
@@ -36,8 +41,10 @@ function onDown(ev) {
   if (canvasEl.setPointerCapture) canvasEl.setPointerCapture(ev.pointerId);
   ev.preventDefault();
   if (fade) return;
-  if (scene === 'desk') deskDown(x, y);
-  else sceneClick(x, y);
+  if (scene === 'desk') {
+    if (D && D.paused) pauseClick(x, y);
+    else deskDown(x, y);
+  } else sceneClick(x, y);
 }
 
 function onMove(ev) {
@@ -56,7 +63,13 @@ function onKey(e) {
   const k = e.key.toLowerCase();
   if (k === 'm') { toggleMute(); return; }
   if (fade) return;
-  if (scene === 'desk') { if (k === ' ') e.preventDefault(); deskKey(k); }
+  if (scene === 'desk') {
+    if (k === 'escape') { e.preventDefault(); togglePause(); return; }
+    // Tab / Enter 是印章台快捷键：挡掉浏览器的焦点切换 / 按钮触发
+    if (k === 'tab' || k === 'enter') e.preventDefault();
+    if (D && D.paused) return;
+    deskKey(k);
+  }
 }
 
 function sceneClick(x, y) {

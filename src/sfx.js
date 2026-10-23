@@ -425,6 +425,35 @@ const SFX = (() => {
     return src;
   }
 
+  // ———————————————— 场景配乐 ————————————————
+  // 同一时间只播一首，每首只播一遍（不循环）：换场时旧曲淡出、新曲淡入，不会硬切。
+  let bgmName = null, bgmSrc = null, bgmGain = null, bgmWant = null;
+
+  function startBgm(name, gain) {
+    const src = ac.createBufferSource();
+    src.buffer = buffer(name);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, ac.currentTime);
+    g.gain.setTargetAtTime(gain, ac.currentTime, 0.25);
+    src.connect(g).connect(master);
+    src.start();
+    // 播完就清掉记录：之后再进同一个场景（例如结算 → 标题）还会从头播一次
+    src.onended = () => { if (bgmSrc === src) { bgmSrc = null; bgmGain = null; bgmName = null; } };
+    bgmName = name; bgmSrc = src; bgmGain = g;
+  }
+
+  function fadeBgm() {
+    if (!bgmSrc) return;
+    const src = bgmSrc, g = bgmGain, t = ac.currentTime;
+    bgmName = null; bgmSrc = null; bgmGain = null;
+    try {
+      if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t);
+      else g.gain.cancelScheduledValues(t);
+      g.gain.setTargetAtTime(0.0001, t, 0.1);
+      src.stop(t + 0.6);
+    } catch (e) { /* 已经停了 */ }
+  }
+
   const api = {
     init() {
       if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
@@ -435,6 +464,10 @@ const SFX = (() => {
       master = ac.createGain();
       master.gain.value = 0.9;
       master.connect(comp).connect(ac.destination);
+      // 进入场景时音频还没初始化的话，这里补上那首配乐
+      const want = bgmWant;
+      bgmWant = null;
+      if (want) startBgm(want.name, want.gain);
       // 空闲时把常用音效先合成好，避免第一次播放卡顿
       const warm = ['click', 'select', 'accept', 'reject', 'discrepancy', 'inspect_on', 'inspect_off', 'intercom',
         'citation', 'levelup', 'day_hit', 'whoosh', 'sad', 'bell'];
@@ -445,6 +478,18 @@ const SFX = (() => {
     play(name, gain = 1, when = 0) {
       if (!ac) return null;
       return playBuf(buffer(name), gain, when);
+    },
+    // 场景配乐：换曲时淡出旧曲、淡入新曲；同一首不会被打断重来
+    music(name, gain = 0.6) {
+      bgmWant = { name, gain };
+      if (!ac) return;            // 音频还没起来：等 init() 时补播
+      if (bgmName === name) return;
+      fadeBgm();
+      startBgm(name, gain);
+    },
+    stopMusic() {
+      bgmWant = null;
+      if (ac) fadeBgm();
     },
     paper(seed = 0) { if (ac) playBuf(buffer('paper' + (seed % 8), () => paper(seed % 8))); },
     step(seed = 0) { if (ac) playBuf(buffer('step' + (seed % 6), () => footstep(60 + (seed % 6)))); },
@@ -463,12 +508,20 @@ const SFX = (() => {
         ambSrc.buffer = buffer('ambient', ambient);
         ambSrc.loop = true;
         ambGain = ac.createGain();
-        ambGain.gain.value = muted ? 0 : 0.8;
+        ambGain.gain.setValueAtTime(0.0001, ac.currentTime);
+        ambGain.gain.setTargetAtTime(0.8, ac.currentTime, 0.25);
         ambSrc.connect(ambGain).connect(master);
         ambSrc.start();
       } else if (!on && ambSrc) {
-        ambSrc.stop();
+        // 淡出再停，离开检查站时不会「啪」一声断掉
+        const src = ambSrc, g = ambGain;
         ambSrc = null;
+        try {
+          if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(ac.currentTime);
+          else g.gain.cancelScheduledValues(ac.currentTime);
+          g.gain.setTargetAtTime(0.0001, ac.currentTime, 0.1);
+          src.stop(ac.currentTime + 0.5);
+        } catch (e) { /* 已经停了 */ }
       }
     },
     stop(src) { try { if (src) src.stop(); } catch (e) { /* 已经停了 */ } },
