@@ -1,5 +1,6 @@
 'use strict';
 // 规则与请求生成：地区、合法签名、规则手册的内容、随机请求（合规的，或者恰好有一处问题的）。
+// 故事模式的逐日剧情、上岗通告与报纸在 story.js。
 //
 // 请求 spec：
 //   avatar / handle / ip   网络头像精灵 key、昵称、IP 地址（审查窗里显示的“本人”）
@@ -119,113 +120,6 @@ const FULL_RULES = {
   redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0,
 };
 
-// —— 故事模式：从 STORY_DATE 开始，每天一组规则、一份上岗通告（第 1 页正文，之后是附页）、一份《安索兹卡真理报》 ——
-const STORY_DATE = new Date(2077, 10, 30);
-const STORY = [
-  {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '凭证仅限美国地区' }],
-    continents: [['北美洲', ['美国']]], seals: false, regions: ['美国'], tok: false, kinds: ['chat'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region'], legit: 0, wanted: false, redTeam: false,
-    inspect: false,
-    notice: '欢迎你来到安全网关检查点的新岗位报到。\n\n将凭证拖到右侧盖章，然后返还凭证给用户。\n\n仅限美国用户请求。\n\n拒绝所有外国请求。',
-    pages: [
-      { head: '查验要点', body: '注意查验凭证的地区。', sample: '地区' },
-      {
-        head: '网关使用说明',
-        body: '1. 按柜台上的『下一位』接入请求。\n2. 把柜台上的凭证拖到桌面上打开。\n3. 对照规则手册核对凭证。\n'
-          + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拦截 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。',
-      },
-    ],
-    news: { h1: '边境开放！', sub: '安全部：本国仅向支持地区开放', h2: '发言人：我们对所有人都非常友善'},
-  },
-  // 第二天：条例换成「地区 + 有效期」，桌面开放『比对』；凭证仍是唯一证件，请求都是对话
-  {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'date', head: '证件须在有效期内' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp'], legit: 0, wanted: false, redTeam: false,
-    inspect: true,
-    notice: '从今日起，允许通过带有有效凭证的请求。\n\n你的网关现已安装比对能力。\n\n认真检查凭证所有信息是否存在不符事项。拒绝任何含不一致信息的请求。',
-    pages: [
-      { body: '比对模式\n\n使用位于桌面右下角的应用进入比对模式。审查时，点击两条不相符的信息以获取进一步处置的选项。\n\n宪法与规则\n\n本岗位须遵循安全部的宪法与规则。仔细阅读规则手册。' },
-      { body: '在审查模式中点选两条不相符的信息以开始询问。' },
-      {
-        head: '网关使用说明',
-        body: '1. 按柜台上的『下一位』接入请求。\n2. 把柜台上的凭证拖到桌面上打开。\n3. 对照规则手册核对凭证。\n'
-          + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拦截 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。',
-      },
-    ],
-    news: {
-      h1: '过期证件禁止通行',
-      sub: '安全部：宽限期已于昨日结束，各检查点即日起严查凭证有效期',
-      h2: '发言人：日期不是装饰，请自行核对凭证',
-    },
-  },
-  // 第三天：第二天的请求堵塞事故后，外国请求（美国以外的支持地区）改持「请求券」——券上只有有效期；
-  // 无券或逾期才拦，凭证地区不在支持地区的请求仍按「地区不支持」直接拦截
-  {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证' },{ key: 'region', head: '凭证地区须为支持地区' }, { key: 'voucher', head: '外国请求须持有效请求券' }, { key: 'date', head: '证件须在有效期内' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp', 'no_voucher'], legit: 0, wanted: false,
-    redTeam: false, redGuards: true, inspect: true, voucher: true, foreign: 0.5,
-    notice: '昨日网关前发生严重请求堵塞事故。\n\n所有外国请求须持有效“请求券”。\n\n核实相应信息后给凭证盖章，并返还所有证件给用户。',
-    pages: [
-      { body: '可在规则手册内点击相应规则，来指出缺少的证件。' },
-      {
-        head: '网关使用说明',
-        body: '1. 按柜台上的『下一位』接入请求。\n2. 把柜台上的证件拖到桌面上打开。\n3. 对照规则手册核对证件。\n'
-          + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拦截 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。',
-      },
-    ],
-    news: {
-      h1: '请求大堵塞',
-      sub: '昨日发生严重积压事故：逾万条请求滞留，有人等了十二小时',
-      h2: '安全部：即日起外国请求须持有效请求券，无券或逾期一律拦截',
-      icon: 'gate',
-    },
-  },
-  // 第四天：请求券作废，改用安全部会话中心签发的「令牌」——只登记 IP、签发日期和有效期，
-  // 没有语言、时区和签名指纹。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
-  {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证和令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
-      { key: 'date', head: '证件须在有效期内' }, { key: 'match', head: '证件上的 IP 须与本人一致' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
-    tokRows: ['IP', '签发', '有效期'], tokSig: false,
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp', 'ip', 'no_tok'], legit: 0,
-    wanted: false, redTeam: false, redGuards: true, inspect: true, voucher: false, foreign: 0,
-    notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器令牌”。\n\n请求券不再有效。',
-    pages: [
-      { body: '详细检查所有信息\n\n拒绝任何所持证件不符要求的请求。\n\n参考“历史记录”，用以关联用户的陈述。' },
-    ],
-    news: {
-      h1: '请求券作废',
-      sub: '安全部：请求券作废，改用浏览器令牌；只登记 IP、签发日期与有效期',
-      h2: '发言人：要记的栏位越少，出错的地方就越少',
-    },
-  },
-  // 第五天：拘留权限开放。左上的红队 clawd 进驻，比对出 IP 不符 / 证件过期 / 签发日期在未来（伪造证件）后可以拘留
-  {
-    rules: [{ key: 'docs', head: '每个请求须出示凭证和令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
-      { key: 'date', head: '证件须在有效期内' }, { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
-      { key: 'match', head: '证件上的 IP 须与本人一致' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
-    tokRows: ['IP', '签发', '有效期'], tokSig: false,
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: false, flaws: ['region', 'exp', 'ip', 'no_tok', 'future'], legit: 0,
-    wanted: false, redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0,
-    notice: '你现已被授权可拘留非法请求。\n\n对异常事项进行询问以开启拘留选项。',
-    pages: [
-      {
-        head: '网关使用说明',
-        body: '1. 按柜台上的『下一位』接入请求。\n2. 把柜台上的证件拖到桌面上打开。\n3. 对照规则手册核对证件。\n'
-          + '4. 指针移到桌面右边缘，拉出决定栏，\n    把凭证拖进 放行 / 拦截 栏盖章。\n5. 把凭证拖回审查窗的头像处，还给用户。',
-      },
-    ],
-    news: {
-      h1: '红队进驻',
-      sub: '安全部：各检查点即日起可直接拘留违规请求，无需移交',
-      h2: '发言人：切断连接只是开始；被带走的请求将接受“进一步询问”',
-    },
-  },
-];
 
 // ———————————————— 工具 ————————————————
 

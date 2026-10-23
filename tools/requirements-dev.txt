@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# 浏览器回归检查（tools/screenshot_check.py）；需要本机安装 Edge 或 Chrome
+playwright>=1.40

@@ -148,7 +148,7 @@ function drawTitle(t) {
     for (const [m, box] of Object.entries(ENDLESS_CARDS)) modeCard(box, { ...MODES[m], key: m }, rec[m] || 0);
     button(BACK_BTN, '◀ 返回', K.DIM, { size: 8 });
   }
-  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拦截  E 比对  R 策略  空格 下一位', 8, K.DIM, 'ma');
+  txt(W / 2, 318, '鼠标或手指操作 · 键盘：A 放行  D 拦截  E 比对  R 手册  空格 下一位', 8, K.DIM, 'ma');
   txt(W / 2, 336, '致敬 Lucas Pope《Papers, Please》 · 画面音效均由程序生成 · 字体：缝合像素字体 (OFL)', 8, K.DIM_D, 'ma');
   scanlines(0, 0, W - 1, H - 1, 0.1);
 }

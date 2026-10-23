@@ -1,21 +1,23 @@
 'use strict';
-// 臨時驗證：請求券生成、比對欄位、前兩天回歸。跑完就刪。
+// 请求生成回归检查：请求券 / 比对栏位 / 前两天的出题范围 / 手册与通告版面。
+// 不依赖浏览器，直接跑：node tools/check_requests.js
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const root = path.resolve(__dirname, '..');
+const src = path.join(root, 'src');
 
 global.window = {};
-require(path.join(root, 'assets.js'));
+require(path.join(src, 'assets.js'));
 
 const ctx = vm.createContext({
   ASSETS: global.window.ASSETS,
   window: { ASSETS: global.window.ASSETS },
   console, Date, Math, Set, Map, JSON, String, Number, Array, Object,
 });
-vm.runInContext(fs.readFileSync(path.join(root, 'gfx.js'), 'utf8'), ctx, { filename: 'gfx.js' });
-vm.runInContext(fs.readFileSync(path.join(root, 'data.js'), 'utf8'), ctx, { filename: 'data.js' });
-vm.runInContext(fs.readFileSync(path.join(root, 'docs.js'), 'utf8'), ctx, { filename: 'docs.js' });
+for (const name of ['gfx.js', 'data.js', 'story.js', 'docs.js']) {
+  vm.runInContext(fs.readFileSync(path.join(src, name), 'utf8'), ctx, { filename: name });
+}
 
 const get = (expr) => vm.runInContext(expr, ctx);
 const STORY = get('STORY');

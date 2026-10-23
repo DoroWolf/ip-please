@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""把像素素材预渲染成网页游戏用的图集，输出仓库根目录的 assets.js。
+"""把像素素材预渲染成网页游戏用的图集，输出 src/assets.js。
 
   pip install -r tools/requirements.txt
   python tools/build_assets.py
 
-- 字体图集：扫描根目录下所有 JS/HTML 里出现的字符，只渲染这些字（缝合像素字体 8/10/12px）
+- 字体图集：扫描 src/ 下所有 JS 与 index.html 里出现的字符，只渲染这些字（缝合像素字体 8/10/12px）
 - 精灵图集：节点的网络头像（风景、宠物、花、字母、几何、默认剪影、少量自拍），统一套像素滤镜；Claude 徽标；
   故事模式《安索兹卡真理报》的配图
 产物是一个 JS 文件（图片以 base64 内嵌），所以 index.html 直接双击也能玩。
@@ -30,7 +30,7 @@ from pp.people import Person  # noqa: E402
 
 def used_chars():
     chars = {chr(c) for c in range(32, 127)}
-    for p in sorted(SITE.glob("*.js")) + [SITE / "index.html"]:
+    for p in sorted((SITE / "src").rglob("*.js")) + [SITE / "index.html"]:
         if p.name == "assets.js" or not p.exists():
             continue
         chars |= set(p.read_text(encoding="utf-8"))
@@ -315,7 +315,7 @@ def main():
     for name, b in blobs.items():
         js.append(f'  {name}: "data:image/png;base64,{b}",')
     js.append("};")
-    out = SITE / "assets.js"
+    out = SITE / "src" / "assets.js"
     out.write_text("\n".join(js) + "\n", encoding="utf-8")
     print("字体字符数：", len(font_meta[12]), " 图集尺寸：", sheet.size)
     print("PNG 大小：", {k: f"{v / 1024:.0f}KB" for k, v in sizes.items()})

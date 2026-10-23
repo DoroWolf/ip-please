@@ -53,27 +53,20 @@
   <button type="button" onclick="this.parentNode.classList.remove('show')" style="margin-top:8px;padding:6px 14px">先竖着玩</button>
 </div>
 <noscript>这个游戏需要开启 JavaScript。</noscript>
-<script src="assets.js"></script>
-<script src="gfx.js"></script>
-<script src="sfx.js"></script>
-<script src="docs.js"></script>
-<script src="data.js"></script>
-<script src="station.js"></script>
-<script src="screens.js"></script>
-<script src="main.js"></script>
-<script>
-  document.getElementById('mute').addEventListener('click', () => toggleMute());
-  const fullBtn = document.getElementById('full');
-  const root = document.documentElement;
-  if (!root.requestFullscreen && !root.webkitRequestFullscreen) fullBtn.style.display = 'none';
-  fullBtn.addEventListener('click', () => {
-    if (document.fullscreenElement || document.webkitFullscreenElement) {
-      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-      return;
-    }
-    const p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
-    if (p && p.then) p.then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
-  });
-</script>
+<!-- 载入顺序：基础绘制 / 音效 → 窗口 → 数据 → 检查站逻辑 → 输入 → 绘制 → 其他画面 → 主循环 -->
+<script src="src/assets.js"></script>
+<script src="src/gfx.js"></script>
+<script src="src/sfx.js"></script>
+<script src="src/docs.js"></script>
+<script src="src/data.js"></script>
+<script src="src/story.js"></script>
+<script src="src/station.js"></script>
+<script src="src/desk.js"></script>
+<script src="src/inspect.js"></script>
+<script src="src/render-station.js"></script>
+<script src="src/intro.js"></script>
+<script src="src/screens.js"></script>
+<script src="src/main.js"></script>
+<script src="src/ui.js"></script>
 </body>
 </html>

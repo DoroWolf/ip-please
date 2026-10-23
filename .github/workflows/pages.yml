@@ -29,8 +29,8 @@ jobs:
       - name: Stage game files
         run: |
           mkdir -p _site
-          cp index.html .nojekyll LICENSE OFL-fusion-pixel.txt *.js _site/
-          cp -r media _site/media
+          cp index.html .nojekyll LICENSE OFL-fusion-pixel.txt _site/
+          cp -r src media _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
