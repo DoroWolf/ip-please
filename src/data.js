@@ -593,9 +593,10 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const phone = phoneNum(region);
     const docName = spec.nameField ? docs[spec.nameField.split('.')[0]][spec.nameField.split('.')[1]] : null;
     const others = NAMES.filter((n) => n !== handle && n !== docName);
-    // 曾用名：改过昵称的合规请求一定留着旧昵称；其余档案有时没有任何曾用名（印「无」）
+    // 曾用名：只有涉及昵称不一致（证件昵称 ≠ 本人昵称）时才会出现；改过昵称的合规请求一定留着旧昵称。其余一律印「无」
     let names;
-    if (spec.legit && docName) names = [docName, pick(others)];
+    if (!docName) names = [];
+    else if (spec.legit) names = [docName, pick(others)];
     else if (Math.random() < P_NO_OLDNAME) names = [];
     else {
       const n0 = pick(others);

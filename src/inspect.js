@@ -113,7 +113,6 @@ function smsSend(w) {
   const s = e.spec.sms;
   later(1.0, () => {
     if (D.ent !== e || e.leaving) return;
-    say('E', `我的手机号是 ${s.reply}。`);
     w.win.rows = [['手机', s.reply, true]];
     w.win.layout();
     addWin(w.win, 'smsf', ...clampDesk(236, 160, w.win));
