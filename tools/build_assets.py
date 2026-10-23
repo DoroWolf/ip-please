@@ -316,7 +316,9 @@ def main():
         js.append(f'  {name}: "data:image/png;base64,{b}",')
     js.append("};")
     out = SITE / "src" / "assets.js"
-    out.write_text("\n".join(js) + "\n", encoding="utf-8")
+    # 明确用 LF：Windows 上 write_text 默认会把 \n 转成 CRLF，和仓库约定不一致
+    with out.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(js) + "\n")
     print("字体字符数：", len(font_meta[12]), " 图集尺寸：", sheet.size)
     print("PNG 大小：", {k: f"{v / 1024:.0f}KB" for k, v in sizes.items()})
     print(f"assets.js：{out.stat().st_size / 1024:.0f}KB")
