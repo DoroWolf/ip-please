@@ -31,12 +31,21 @@ function closeWin(w) {
   SFX.play('click');
 }
 
+// 任务栏按钮的右边界：右下角还要画世界观日期（故事模式再加一个班次时间），
+// 按钮多了也不能压到日期上，所以按日期 / 时间的实际宽度让开
+function taskRight() {
+  const clock = RUN && RUN.mode === 'story' ? tw(`  ${worldClock()}`, 8) : 0;
+  const date = RUN ? tw(fmtDate(today()), 8) : 0;
+  return Math.min(TASK_X[1], DATE_BOX[2] - date - clock - 4);
+}
+
 // 任务栏按钮：窗口多了就变窄，文字塞不下就截短
 function taskButtons() {
   const ws = [...D.wins].sort((a, b) => a.seq - b.seq);
-  const gap = 3, bw = Math.min(64, Math.floor((TASK_X[1] - TASK_X[0] + gap) / Math.max(1, ws.length)) - gap);
+  const gap = 3, x0 = TASK_X[0], x1 = taskRight();
+  const bw = Math.min(64, Math.floor((x1 - x0 + gap) / Math.max(1, ws.length)) - gap);
   return ws.map((w, i) => {
-    const x = TASK_X[0] + i * (bw + gap);
+    const x = x0 + i * (bw + gap);
     return { w, box: [x, TASKBAR[1] + 2, x + bw - 1, TASKBAR[3] - 2] };
   });
 }

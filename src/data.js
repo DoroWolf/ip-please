@@ -77,6 +77,8 @@ const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '
 // 还有流量异常且嗅探出特殊进程的请求（traffic；难度 2 的条例「不得运行爬虫或自动化脚本」）。
 // 头像 / 昵称 / 企业授权的账号 / 使用设备这几种身份矛盾要先『验证 SMS』，不能直接拘留
 const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake', 'device', 'traffic'];
+// 企业授权自身的问题（授权企业一栏不含 Anthrotzka 的 ent_auth、凭证地区与签发企业所在地区不符的 ent_region）
+// 只能拒绝，不能拘留：它们说明证件无效，不等同于伪造或冒用
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
 // 审查出这些问题后拘留按钮亮起（issue.type）：除了上面的问题，还有 SMS 验证里查出的矛盾、嗅探出的特殊进程。
 // 流量异常本身不能拘留，要先请求嗅探、拿后台进程对照条例「不得运行爬虫或自动化脚本」，查到特殊进程（proc）才行
@@ -91,23 +93,26 @@ const P_NO_OLDNAME = 0.35;
 // 凭证地区对应的手机号国家码
 const PHONE_CC = {
   '美国': '+1', '英国': '+44', '法国': '+33', '日本': '+81', '德国': '+49', '新加坡': '+65',
-  '加拿大': '+1', '澳大利亚': '+61', '中国大陆': '+86',
+  '加拿大': '+1', '澳大利亚': '+61', '中国大陆': '+86', '中国香港': '+852', '俄罗斯': '+7',
+  '伊朗': '+98', '朝鲜': '+850',
 };
 
 // —— 企业授权（无尽模式难度 2）：仿照《Papers, Please》的外交授权 ——
 // 企业账户只出示凭证和企业授权；「授权企业」里有 Anthrotzka 才能放行，且不受地区限制。
-// 凭证地区一定是签发企业的所在地区（不出这类错，免得玩家困惑）。
+// 凭证地区一般就是签发企业的所在地区；隐藏条例 ent_region 会印成另一个支持地区（见 RULES_2）。
+// 数组顺序就是手册「企业名录」的印刷顺序：Anthrotzka（本国企业）在前，OpenMind 第二。
+// Anthrotzka 只出现在授权的「授权企业」一栏，不会自己签发企业授权（访问自家服务不经过外部网关）。
 // icon：11×11 的像素图标（字符 → 颜色），企业授权的横幅和手册的企业名录共用
-// fakes：伪造企业授权（ent_fake）横幅上印的山寨名称，乍一看差不多。DeepThink 的授权一律无效，不会被伪造
+// fakes：伪造企业授权（ent_fake）横幅上印的山寨名称，乍一看差不多。DeepThink 的授权一律无效，但也可以伪造
 const CORPS = [
+  { key: 'anthrotzka', name: 'Anthrotzka', region: '美国', icon: {
+    pat: ['.....A.....', '.A...A...A.', '..A..A..A..', '...A.A.A...', '....AAA....', 'AAAAAAAAAAA',
+      '....AAA....', '...A.A.A...', '..A..A..A..', '.A...A...A.', '.....A.....'],
+    cols: { A: [232, 156, 116] } } },
   { key: 'openmind', name: 'OpenMind', region: '美国', fakes: ['OpenMlnd', '0penMind', 'OpenMind.'], icon: {
     pat: ['....WWW....', '..WWW.WWW..', '.WW.....WW.', '.W..WWW..W.', 'WW.W...W.WW', 'W..W...W..W',
       'WW.W...W.WW', '.W..WWW..W.', '.WW.....WW.', '..WWW.WWW..', '....WWW....'],
     cols: { W: [230, 240, 236] } } },
-  { key: 'anthrotzka', name: 'Anthrotzka', region: '美国', fakes: ['Anthrotska', 'Antrhotzka', 'AnthroTzka'], icon: {
-    pat: ['.....A.....', '.A...A...A.', '..A..A..A..', '...A.A.A...', '....AAA....', 'AAAAAAAAAAA',
-      '....AAA....', '...A.A.A...', '..A..A..A..', '.A...A...A.', '.....A.....'],
-    cols: { A: [232, 156, 116] } } },
   { key: 'googol', name: 'Googol', region: '美国', fakes: ['Gooqol', 'Googo1', 'Goggol'], icon: {
     pat: ['...RRRRR...', '.RRRRRRRRR.', 'RRR.....RR.', 'YY.........', 'YY.........', 'YY...BBBBBB',
       'YY...BBBBBB', 'GG.......BB', 'GGG.....BB.', '.GGGGGGGBB.', '...GGGGG...'],
@@ -120,7 +125,7 @@ const CORPS = [
     pat: ['...........', '11......11.', '11......11.', '2222..2222.', '2222..2222.', '3333333333.',
       '3333333333.', '44..44..44.', '44..44..44.', '55......55.', '55......55.'],
     cols: { 1: [255, 216, 0], 2: [255, 175, 0], 3: [255, 130, 5], 4: [250, 80, 15], 5: [225, 30, 10] } } },
-  { key: 'deepthink', name: 'DeepThink', region: '中国大陆', icon: {
+  { key: 'deepthink', name: 'DeepThink', region: '中国大陆', fakes: ['DeepThlnk', 'DeapThink', 'DeepThink.'], icon: {
     pat: ['...........', '........B.B', '.........B.', '..BBBBB..B.', '.BBBBBBBBB.', 'BBWBBBBBBB.',
       'BBBBBBBBB..', '.LLLLLBB...', '..LLLL.....', '...........', '...........'],
     cols: { B: [90, 130, 250], W: [230, 240, 236], L: [170, 196, 255] } } },
@@ -193,12 +198,15 @@ const RULES = [
   { key: 'wanted', head: '特别关注对象的请求须拒绝', hidden: true },
   { key: 'sms', head: '头像 / 昵称 / 企业账号不符时可验证 SMS', hidden: true },
 ];
-// 无尽模式难度 2：个人账户的令牌之外还要出示环境信息卡；企业账户改凭企业授权（授权书须写明 Anthrotzka，否则视为无效证件）
+// 无尽模式难度 2：个人账户的令牌之外还要出示环境信息卡；企业账户改凭企业授权（授权书须写明 Anthrotzka，否则视为无效证件）。
+// 企业账户的凭证地区还要和签发企业在手册「企业名录」上的所在地区一致，这条是隐藏条例（不印在手册上）。
 // 新增的爬虫 / 自动化脚本条例排在「所有证件须为当前有效」之后
 const RULES_2 = RULES.flatMap((r) => {
   if (r.key === 'personal') return [{ ...r, head: '个人账户需出示令牌和环境信息卡' }];
   if (r.key === 'date') return [r, { key: 'crawler', head: '不得运行爬虫或自动化脚本' }];
-  if (r.key === 'scope') return [r, { key: 'ent', head: `企业账户需出示企业授权` }];
+  if (r.key === 'scope') return [r,
+    { key: 'ent', head: `企业账户需出示企业授权` },
+    { key: 'ent_region', head: '企业账户的凭证地区须与企业所在地区一致', hidden: true }];
   if (r.key === 'sms') return [{ ...r, head: '头像 / 昵称 / 设备 / 企业账号不符时可验证 SMS' },
     { key: 'sniff', head: '请求流量异常时可请求嗅探', hidden: true }];
   return [r];
@@ -263,7 +271,24 @@ const ispOf = (region) => {
   return `${city} · ${name}`;
 };
 const digits = (n) => Array.from({ length: n }, () => rint(0, 9)).join('');
-const phoneNum = (region) => `${PHONE_CC[region] || '+1'} ${rint(2, 9)}${digits(2)}-${digits(3)}-${digits(4)}`;
+// 手机号按凭证地区的号码格式生成：位数与分组随地区不同，不套用美加的 3-3-4 十一位。
+// 这里只生成国家码之后的部分，号段也照当地习惯（例如英国手机 7 开头、中国大陆手机 1 开头）
+const PHONE_TAIL = {
+  '美国': () => `${rint(2, 9)}${digits(2)}-${digits(3)}-${digits(4)}`,      // NXX-NXX-XXXX
+  '加拿大': () => `${rint(2, 9)}${digits(2)}-${digits(3)}-${digits(4)}`,      // NXX-NXX-XXXX
+  '英国': () => `7${rint(1, 9)}${digits(2)} ${digits(6)}`,                    // 07XXX XXXXXX
+  '法国': () => `6 ${digits(2)} ${digits(2)} ${digits(2)} ${digits(2)}`,      // 06 XX XX XX XX
+  '日本': () => `90-${digits(4)}-${digits(4)}`,                               // 090-XXXX-XXXX
+  '德国': () => `1${rint(5, 7)}${digits(1)} ${digits(8)}`,                    // 015X XXXXXXXX
+  '新加坡': () => `${digits(4)} ${digits(4)}`,                                // XXXX XXXX（8 位）
+  '澳大利亚': () => `4${digits(2)} ${digits(3)} ${digits(3)}`,                // 04XX XXX XXX
+  '中国大陆': () => `1${rint(3, 9)}${digits(1)} ${digits(4)} ${digits(4)}`,   // 1XX XXXX XXXX
+  '中国香港': () => `${digits(4)} ${digits(4)}`,                              // XXXX XXXX（8 位）
+  '俄罗斯': () => `9${digits(2)} ${digits(3)}-${digits(2)}-${digits(2)}`,     // 9XX XXX-XX-XX
+  '伊朗': () => `9${digits(2)} ${digits(3)} ${digits(4)}`,                    // 9XX XXX XXXX
+  '朝鲜': () => `191 ${digits(4)}`,                                           // 0191 XXXX
+};
+const phoneNum = (region) => `${PHONE_CC[region] || '+1'} ${(PHONE_TAIL[region] || PHONE_TAIL['美国'])()}`;
 // 改号码里的一位数字（国家码不动）
 function phoneVariant(p) {
   const chars = [...p];
@@ -335,6 +360,7 @@ const QUESTIONS = {
   isp: '令牌上的运营商不在你的凭证地区。',
   no_env: '你没有出示环境信息卡。', ent_auth: `你的企业授权没有写 ${HOST_CORP}。`, ent_acct: '企业授权上的账号对不上。',
   ent_fake: '你的企业授权是伪造的。',
+  ent_region: '你的凭证地区与签发企业的所在地区不一致。',
   device: '你现在用的不是常用设备。', traffic: '你的请求流量比平时高太多了。', proc: '你的设备在后台跑着特殊进程。',
 };
 const EXCUSES = {
@@ -359,6 +385,7 @@ const EXCUSES = {
   ent_auth: ['公司说已经签约了。', '授权还在续签中。', '我们是合作伙伴啊。'],
   ent_acct: ['那是同事的账号。', '公司统一分配的。', '……我借来用一下。'],
   ent_fake: ['公司发给我的就是这个。', '那是新版的标志。', '……网上办的。'],
+  ent_region: ['公司搬过地方。', '证件是别处办的。', '……地区填错了吧。'],
   device: ['我刚换了新设备。', '这是借来的电脑。', '……手机没电了。'],
   traffic: ['我在传文件。', '网络有点卡吧？', '……我什么都没开。'],
   proc: ['那是系统自带的。', '我不知道那是什么。', '……朋友帮我装的。'],
@@ -403,19 +430,25 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   if (rs.env && ruleKeys.has('personal')) kinds.push('no_env', 'device', 'traffic');
   // 企业账户只出示凭证和企业授权：只出凭证本身（头像 / IP / 过期 / 签名）和企业授权上的问题。
   // 昵称不符留给普通请求；企业授权的账号不符另算 ent_acct，同样可以验证 SMS（旧账号会留在档案的曾用名里）
-  if (ent) kinds = kinds.filter((k) => ['photo', 'ip', 'exp', 'sig'].includes(k)).concat(['ent_auth', 'ent_auth', 'ent_acct', 'ent_fake']);
+  if (ent) {
+    kinds = kinds.filter((k) => ['photo', 'ip', 'exp', 'sig'].includes(k))
+      .concat(['ent_auth', 'ent_auth', 'ent_acct', 'ent_fake']);
+    // 隐藏条例：凭证地区须与签发企业的所在地区一致（支持地区至少有两个可选，才印得出别处）
+    if (ruleKeys.has('ent_region') && new Set(rs.regions).size > 1) kinds.push('ent_region');
+  }
   let flaw = wanted.length && Math.random() < P_WANTED ? 'wanted' : kinds.length && Math.random() < pBad ? pick(kinds) : null;
   // 请求券：只有本国（美国 / 英国）请求不需要。支持地区内的其他国家（如日本 / 德国 / 新加坡 / 法国 / 澳大利亚 / 加拿大）算外国请求；
   // 凭证地区不在支持地区是 region 问题，有券也不能放行，所以不会生成请求券
   const foreign = !ent && !!rs.voucher && flaw !== 'region' && foreignRegions.length > 0
     && (flaw === 'no_voucher' || Math.random() < (rs.foreign || 0));
-  // 签发企业：DeepThink 的企业授权必定不含 Anthrotzka（一律无效）；ent_auth 也不由 Anthrotzka 签发。
-  // 特别关注对象、伪造授权不落在 DeepThink，免得一单同时有「无效授权」和「可拘留」两种处置。
+  // 签发企业：Anthrotzka 是本国企业，访问自家服务不经过这道外部网关，所以不会自己出具企业授权
+  // （它只出现在「授权企业」一栏）。DeepThink 的授权企业一栏必定不含 Anthrotzka：默认按授权无效出题；
+  // 特别关注对象 / 伪造授权照常可以落在 DeepThink（这两个疑点可以拘留，授权无效与地区不支持只能拒绝）。
+  // ent_region 要拿凭证地区对照企业名录，不和 DeepThink 的授权无效叠在同一单。
   const corp = ent
-    ? pick(CORPS.filter((c) => (flaw === 'ent_auth' ? c.name !== HOST_CORP
-      : flaw === 'wanted' || flaw === 'ent_fake' ? c.key !== 'deepthink' : true)))
+    ? pick(CORPS.filter((c) => c.name !== HOST_CORP && (flaw === 'ent_region' ? c.key !== 'deepthink' : true)))
     : null;
-  if (corp && corp.key === 'deepthink') flaw = 'ent_auth';
+  if (corp && corp.key === 'deepthink' && flaw !== 'wanted' && flaw !== 'ent_fake') flaw = 'ent_auth';
   // 合规但看着可疑：本人换过头像 / 改过昵称 / 换过企业账号 / 换了设备（验证 SMS 可以确认），或流量来自正常进程（请求嗅探可以确认）。
   // 设备和流量对照环境信息卡，只在有卡的规则组里出；企业账户只出示凭证和企业授权，账号可能只是旧账号，放在这里一起出
   const legitPool = ent ? ['photo', 'ent_acct'] : rs.env ? ['photo', 'name', 'device', 'traffic'] : ['photo', 'name'];
@@ -430,12 +463,15 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const wi = flaw === 'wanted' ? rint(0, wanted.length - 1) : -1;
   const avatar = wi >= 0 ? wanted[wi] : pick(pool), handle = pick(NAMES), ip = ipv4();
   const day = (a, b) => fmtDate(addDays(today, rint(a, b)));
-  // 企业账户的凭证地区一定是签发企业的所在地区
-  const region = corp ? corp.region : flaw === 'region'
-    ? pick(Object.keys(REGION_LOCALE).filter((r) => !rs.regions.includes(r)))
-    : rs.voucher
-      ? (foreign ? pick(foreignRegions) : pick(homeRegions))
-      : pick(rs.regions);
+  // 企业账户的凭证地区一般是签发企业的所在地区；隐藏条例 ent_region 会印成另一个支持地区
+  const altRegions = corp && flaw === 'ent_region' ? rs.regions.filter((r) => r !== corp.region) : [];
+  const region = corp
+    ? (altRegions.length ? pick(altRegions) : corp.region)
+    : flaw === 'region'
+      ? pick(Object.keys(REGION_LOCALE).filter((r) => !rs.regions.includes(r)))
+      : rs.voucher
+        ? (foreign ? pick(foreignRegions) : pick(homeRegions))
+        : pick(rs.regions);
   const [lang, tz] = REGION_LOCALE[region] || ['en-US', 'UTC+00:00'];
   const cred = { photo: avatar, IP: ip, 昵称: handle, 地区: region, 套餐: pick(PLANS), 有效期: day(20, 900), sig: rs.sig ? genuine('cred') : null };
   const tok = rs.tok && !ent
@@ -452,14 +488,15 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const avgFlow = rint(8, 60);
   const flow = rs.env ? Math.max(1, Math.round(avgFlow * (0.7 + Math.random() * 0.7))) : null;
   const env = rs.env && !ent ? { 时区: tz, 常用设备: device, 平均流量: fmtFlow(avgFlow) } : null;
-  // 企业授权：授权企业是另外 0–2 家企业，再插进 Anthrotzka（ent_auth 偏偏少了它）；签发企业自己不列。
-  // DeepThink 一定是 ent_auth，所以它的授权企业必定不含 Anthrotzka。
+  // 企业授权：授权企业是另外 0–2 家企业，再插进 Anthrotzka（授权无效时没有它）；签发企业自己不列。
+  // DeepThink 的授权一律无效，所以不论这一单还有什么问题，授权企业一栏都不含 Anthrotzka。
+  const lackHost = !!corp && (corp.key === 'deepthink' || flaw === 'ent_auth');
   let entDoc = null;
   if (corp) {
     const others = CORPS.filter((c) => c !== corp && c.name !== HOST_CORP).map((c) => c.name);
     const list = [];
-    for (let n = flaw === 'ent_auth' ? rint(1, 3) : rint(0, 2); list.length < n;) list.push(pick(others.filter((o) => !list.includes(o))));
-    if (flaw !== 'ent_auth') list.splice(rint(0, list.length), 0, HOST_CORP);
+    for (let n = lackHost ? rint(1, 3) : rint(0, 2); list.length < n;) list.push(pick(others.filter((o) => !list.includes(o))));
+    if (!lackHost) list.splice(rint(0, list.length), 0, HOST_CORP);
     entDoc = { 企业: corp.name, 账号: handle, IP: ip, 授权企业: list.join(', ') };
   }
   const docs = { cred, tok, api, voucher, env, ent: entDoc };
@@ -502,6 +539,12 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       issue([['cred.地区', 'rule.region']], '地区不支持', `凭证地区：${cred.地区}   不在支持地区`, 'region');
     }
     spec.reason = `企业授权的授权企业不含 ${HOST_CORP}`;
+  } else if (flaw === 'ent_region') {
+    // 隐藏条例：凭证地区必须和签发企业在手册「企业名录」上的所在地区一致。
+    // 授权企业一栏照常写着 Anthrotzka；不对照地区的话，这张授权本身是齐全的
+    issue([['cred.地区', 'book.ent'], ['ent.企业', 'cred.地区']], '地区与企业不符',
+      `凭证地区：${cred.地区}   ${corp.name}（企业名录）：${corp.region}`, 'ent_region');
+    spec.reason = `凭证地区（${cred.地区}）与企业授权签发企业（${corp.name}，${corp.region}）不符`;
   } else if (idf === 'ent_acct') {
     // 企业授权上的账号差一点：可能是本人的旧账号（合规，档案的曾用名里有它），也可能是冒用。
     // 拿凭证昵称或本人昵称审查都能查出来；和头像 / 昵称一样要先验证 SMS 才分得出来，不能直接拘留
@@ -630,6 +673,15 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     spec.reason = `本人为特别关注对象 ${WANTED_TAGS[wi]}`;
   }
 
+  // DeepThink 的授权企业一栏必定不含 Anthrotzka：授权本身无效（只能拒绝）。
+  // 特别关注对象 / 伪造授权是另外的疑点，照常可以拘留，这里不覆盖这一单的 flaw。
+  if (corp && corp.key === 'deepthink' && flaw !== 'ent_auth') {
+    issue([['ent.授权企业', 'rule.ent']], '企业授权无效', `授权企业：${entDoc.授权企业}   不含 ${HOST_CORP}`, 'ent_auth');
+    if (!rs.regions.includes(region)) {
+      issue([['cred.地区', 'rule.region']], '地区不支持', `凭证地区：${cred.地区}   不在支持地区`, 'region');
+    }
+  }
+
   // 令牌的运营商属于凭证地区，不随 IP 变动：IP 不符的令牌改过 IP，运营商仍然对得上地区
 
   // 第三天：地区条例仍在。支持地区（含美国、英国）都比得过去；不在支持地区的是 region 问题。
@@ -706,7 +758,8 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       pair('env.时区', 'rule.region');
     }
   }
-  // 企业授权：账号 / IP 对本人和凭证；授权企业一栏对「企业账户须出示…」；签发企业在企业名录里，所在地区就是凭证地区
+  // 企业授权：账号 / IP 对本人和凭证；授权企业一栏对「企业账户须出示…」；
+  // 签发企业在企业名录里，所在地区一般就是凭证地区（隐藏条例 ent_region 会让两者不符）
   if (docs.ent) {
     pair('ent.账号', 'cred.昵称');
     pair('ent.账号', 'rv.昵称');

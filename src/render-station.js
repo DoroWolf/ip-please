@@ -158,7 +158,7 @@ function drawReview() {
   const [ax, ay] = AVATAR_XY, as = 22 * AVATAR_K;
   frame(ax - 2, ay - 2, ax + as + 1, ay + as + 1, K.CYAN_D, K.INK);
   const e = D.ent;
-  if (e) drawAvatar(e, ax, ay, as);
+  if (e) { drawAvatar(e, ax, ay, as); if (e.sniffScan && !e.leaving) drawXray(e.sniffScan, ax, ay, as); }
   else {
     for (let i = 0; i < 60; i++) {
       const nx = ax + ((i * 37 + Math.floor(now * 9) * 13) % as), ny = ay + ((i * 53 + Math.floor(now * 9) * 7) % as);
@@ -212,6 +212,29 @@ function drawReview() {
     txt(ic.x + 13, ic.y + 22, ICON_LABELS[ic.win.key] || ic.win.title, 8, K.DIM, 'ma');
   }
   drawCounterArrows();
+  G.restore();
+}
+
+// 请求嗅探等待期间的 X 光扫描：整块头像泛青、横向扫描线上下往返，扫过的位置留下渐隐的光带
+function drawXray(sc, ax, ay, as) {
+  G.save();
+  G.beginPath();
+  G.rect(ax, ay, as, as);
+  G.clip();
+  G.globalAlpha = 0.18 + 0.06 * Math.sin(now * 8);
+  rect(ax, ay, ax + as - 1, ay + as - 1, K.CYAN);
+  G.globalAlpha = 0.35;
+  for (let y = ay + (Math.floor(now * 12) % 4); y < ay + as; y += 4) rect(ax, y, ax + as - 1, y, K.CYAN_D);
+  // 扫描线：三角波上下往返，每 1.2 秒一个来回
+  const ph = ((now - sc.t0) / 1.2) % 1, tri = ph < 0.5 ? ph * 2 : 2 - ph * 2;
+  const sy = ay + Math.floor(tri * (as - 1)), dir = ph < 0.5 ? -1 : 1;
+  for (let i = 1; i <= 12; i++) {
+    G.globalAlpha = 0.4 * (1 - i / 13);
+    const ty = sy + dir * i;
+    if (ty >= ay && ty < ay + as) rect(ax, ty, ax + as - 1, ty, K.CYAN);
+  }
+  G.globalAlpha = 1;
+  rect(ax, sy, ax + as - 1, sy + 1, K.WHITE);
   G.restore();
 }
 

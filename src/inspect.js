@@ -143,7 +143,10 @@ function sniffOpen() {
   SFX.play('select', 0.6);
   say('C', '请保持连接，正在嗅探你的请求。');
   const s = e.spec.sniff;
-  later(rint(3, 5), () => {
+  const wait = rint(3, 5);
+  e.sniffScan = { t0: now, t1: now + wait };   // 等待期间头像上播放 X 光扫描动画（render-station.js）
+  later(wait, () => {
+    e.sniffScan = null;
     if (D.ent !== e || e.leaving) return;
     const rep = new InfoWin('sniff', '嗅探报告', 'SNIFF',
       [['请求流量', s.flow, true], ['前台进程', s.fg], ['后台进程', s.bg, true]]);

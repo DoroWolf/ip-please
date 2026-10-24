@@ -268,7 +268,9 @@ class Rulebook {
     }
     endRegionPage();
 
-    // —— 三、企业名录（无尽模式难度 2）：能签发企业授权的企业、图标与所在地区；整张表是一个审查栏位 ——
+    // —— 三、企业名录（无尽模式难度 2）：企业与图标、所在地区；整张表是一个审查栏位 ——
+    // 顺序照 CORPS：Anthrotzka（本国企业）在前，OpenMind 第二。Anthrotzka 只在授权的「授权企业」一栏出现，
+    // 不会自己签发企业授权，所以不会出现在横幅上
     const entPage = page();
     if (rs.ent) {
       let ey = head(entPage, '三、企业名录');
@@ -524,7 +526,11 @@ class InfoWin {
 
   layout() {
     this.noteH = this.note ? 18 : 0;
-    this.w = Math.max(164, this.foot ? tw(this.foot, 8) + 14 : 0, this.note ? tw(this.note, 8) + 20 : 0);
+    // 值栏从标签右边开始：按实际字形宽度量标签（四字标签如「请求流量」在 10px 下就有 40px，
+    // 不能再固定从 42 起画，否则会压到标签上）；窗口也跟着容下最宽的值
+    this.kx = Math.max(42, ...this.rows.map(([k]) => (k ? tw(k, 8) + 12 : 0)));
+    this.w = Math.max(164, this.kx + Math.max(0, ...this.rows.map(([, v]) => tw(v, 8))) + 6,
+      this.foot ? tw(this.foot, 8) + 14 : 0, this.note ? tw(this.note, 8) + 20 : 0);
     this.h = TITLE_H + 6 + this.noteH + 12 * this.rows.length + 4 + (this.foot ? 13 : 0);
     this.fields = {};
     this.rows.forEach(([k, v, field], i) => {
@@ -545,7 +551,7 @@ class InfoWin {
       const yy = y + top + i * 12;
       if (!k) { txt(x + this.w / 2, yy, v, 8, K.TEXT, 'ma'); return; }   // 无标签：整行居中
       txt(x + 6, yy, k, 8, K.DIM);
-      txt(x + 42, yy, v, 8, v.startsWith('_') ? K.DIM_D : K.TEXT);
+      txt(x + this.kx, yy, v, 8, v.startsWith('_') ? K.DIM_D : K.TEXT);
     });
     if (this.foot) {
       const fy = y + this.h - 12;
