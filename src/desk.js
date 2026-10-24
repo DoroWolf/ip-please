@@ -161,6 +161,8 @@ function deskDown(x, y) {
     if (measureAvailable(e)) return;
   }
   if (D.insp.on) {
+    // 点上方请求队列区域直接退出审查：窗口再多也不会挡住审查按钮
+    if (inBox(x, y, PIPE)) { setInspect(false); return; }
     // 审查模式下也能翻手册 / 通告（页签 / 书签 / 目录），方便对照签名式样和特别关注对象
     const w = topWinAt([x, y]);
     if (w && w.win.press && w.win.press(x - w.x, y - w.y)) { SFX.play('select'); return; }

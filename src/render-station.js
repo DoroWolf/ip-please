@@ -150,7 +150,7 @@ function drawPipe() {
 
 // —— 左下：审查窗 ——
 // 柜台图标下的短名：证件名太长的换成简称（图标间距只有 32px）
-const ICON_LABELS = { api: 'API', return: '返回票', env: '环境卡', ent: '企业' };
+const ICON_LABELS = { api: 'API', return: '返回票', env: '环境卡', ent: '企业', pay: '支付', kyc: 'KYC' };
 function drawReview() {
   const [x0, y0, x1, y1] = REVIEW;
   rect(x0, y0, x1, y1, K.BG);
@@ -178,7 +178,7 @@ function drawReview() {
     txt(RV_X, 138 + i * 12, k, 8, ready ? K.DIM : K.DIM_D);
     txt(RV_X + 24, 138 + i * 12, ready ? v : '—', 8, ready ? K.TEXT : K.DIM_D);
   });
-  // 请求摘要不画在这里：它印在令牌上，没有令牌就看不到
+  // 请求摘要不画在这里：它印在浏览器令牌上，没有浏览器令牌就看不到
   // 对话：最近三句
   rect(x0 + 8, 232, x1 - 8, 232, K.LINE);
   const lines = D.lines.slice(-3);

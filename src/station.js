@@ -25,7 +25,7 @@ const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W 
 const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 请求嗅探 / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
-// 审查窗里的可审查栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在令牌上（tok.请求）。
+// 审查窗里的可审查栏位：接入者本人（IP / 昵称 / 类型）。请求摘要印在浏览器令牌上（brw.请求）。
 const RV_FIELDS = {
   'rv.IP': [RV_X - 3, 136, 209, 147], 'rv.昵称': [RV_X - 3, 148, 209, 159], 'rv.类型': [RV_X - 3, 160, 209, 171],
 };
@@ -81,9 +81,10 @@ const MODES = {
 // 无尽模式的难度：标题画面上选，最佳纪录按难度分开存；规则组见 data.js 的 ENDLESS_RULES。
 // notice：上岗通告多出来的附页（介绍这一档新增的证件）
 const DIFFS = [
-  { name: '难度 1', desc: '证件：凭证、令牌、API 授权' },
+  { name: '难度 1', desc: '证件：凭证、浏览器令牌、API 授权' },
   {
     name: '难度 2', desc: '新增证件：环境信息卡、企业授权'},
+  { name: '难度 3', desc: '新增证件：支付凭证、KYC 证明' },
 ];
 const TIMED_LEN = 600, DAY_LEN = 120, DAY_LEN_LATE = 180, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
 const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
@@ -110,7 +111,7 @@ const storyDayLen = () => (lateStory() ? DAY_LEN_LATE : DAY_LEN);
 const hotThrottle = () => RUN.mode === 'story' && RUN.hot > 0 && RUN.day >= HOT_EARLY_FROM_DAY;
 const shiftEndMin = () => SHIFT_START_MIN + shiftSpan() - (hotThrottle() ? HOT_EARLY_MIN : 0);
 const mode = () => MODES[RUN.mode];
-// 世界观日期：故事模式逐日推进；无尽模式按难度（难度 1 = 2078.01.01，难度 2 = 2078.01.02）
+// 世界观日期：故事模式逐日推进；无尽模式按难度（难度 1 = 2078.01.01，难度 2 = 2078.01.02，难度 3 = 2078.01.03）
 const today = () => (RUN.mode === 'story' ? addDays(STORY_DATE, RUN.day - 1) : worldDate(RUN.diff));
 // 故事模式当天的内容（条例、通告、报纸）；规则组：无尽模式按难度用全套
 const storyDay = () => STORY[Math.min(RUN.day, STORY.length) - 1];
@@ -217,7 +218,7 @@ function callNext() {
   D.hinted.next = true;
   say('C', '下一个请求。');
   const k = mode().pace;
-  // 请求摘要印在令牌上：没有令牌时本人只会打招呼，不会主动说明来意
+  // 请求摘要印在浏览器令牌上：没有浏览器令牌时本人只会打招呼，不会主动说明来意
   const said = spec.taskOnTok ? `${spec.greet} ${spec.task}` : spec.greet;
   later(0.5 * k, () => { if (D.ent === e) say('E', said, spec.taskOnTok ? 'req' : null); });
   later(1.2 * k, () => handDocs(e));
@@ -291,7 +292,8 @@ function finishRequest(e) {
 }
 
 // 拘留：审查出可拘留的问题（见 data.js 的 SUSPEND_FLAWS）并询问异常之后才能用。
-// 头像 / 昵称 / 企业授权账号 / 使用设备这几种身份矛盾要先『验证 SMS』（按钮优先显示验证SMS），确认冒用后才轮到这里。
+// 头像 / 昵称 / 企业授权账号 / 使用设备这几种身份矛盾要先『验证 SMS』，确认冒用后才轮到这里。
+// 支付凭证的账单地址 / 手机号异常也先走 SMS：号对得上就放行；对不上会产生手机号不符，询问后才轮到这里。
 // 切断连接，桌面上和柜台上的证件全部清掉，直接判定
 function suspend() {
   const e = D.ent;
@@ -314,9 +316,11 @@ const LEGIT_LINES = {
   photo: '本人换过头像，可经 SMS 验证确认', name: '本人改过昵称，可经 SMS 验证确认',
   ent_acct: '本人换过企业账号，可经 SMS 验证确认',
   device: '本人换了设备，可经 SMS 验证确认', traffic: '流量来自正常进程，可经请求嗅探确认',
+  pay_region: '账单地址有出入，可经 SMS 验证确认', pay_phone: '手机号有出入，可经 SMS 验证确认',
+  bill_kyc: '账单地址与 KYC 住址有出入，可经 SMS 验证确认',
 };
 
-// 只要查出问题（spec.legit：头像 / 昵称 / 企业账号 / 使用设备 / 流量异常），直接拒绝也是合规处置：
+// 只要查出问题（spec.legit：头像 / 昵称 / 企业账号 / 使用设备 / 支付凭证地址手机号 / 流量异常），直接拒绝也是合规处置：
 // 按程序拒绝不算事故；验证 SMS / 请求嗅探只用来确认能不能放行。
 const denyLegit = (e, kind) => kind === 'deny' && !!e.spec.legit;
 
@@ -326,7 +330,10 @@ function judge(e, kind) {
   const stamp = stampDocOf(e);
   const passOnTicket = kind === 'approve' && !!stamp && stamp.key === 'return';
   const proceduralDeny = denyLegit(e, kind);
-  const right = proceduralDeny || (kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
+  // 拘留判定看这一单的主问题，也看同时存在的其他疑点（例如 DeepThink 的授权无效 + 地区不支持）；
+  // spec.legit 的合规疑点即使查出了矛盾，也不能当成拘留理由。
+  const suspendable = !spec.legit && (SUSPEND_FLAWS.includes(spec.flaw) || spec.issues.some((is) => SUSPEND_FLAWS.includes(is.type)));
+  const right = proceduralDeny || (kind === 'suspend' ? suspendable : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
   RUN.processed++; D.total++;
   // 放行：网关对通过的请求说一句标准招呼
   if (kind === 'approve') say('C', '欢迎使用 Claude。');

@@ -1,9 +1,10 @@
 'use strict';
-// 桌面上的窗口：证件（凭证 / 令牌 / API 授权 / 请求券）、规则手册、官方通告、事故通知、历史记录。
+// 桌面上的窗口：证件（凭证 / 浏览器令牌 / API 授权 / 请求券）、规则手册、官方通告、事故通知、历史记录。
 // 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（审查模式用）。
 
 const TITLE_H = 12;
-const DOC_SUBS = { cred: 'CREDENTIAL', tok: 'TOKEN', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN', env: 'ENV CARD', ent: 'ENTERPRISE' };
+const DOC_SUBS = { cred: 'CREDENTIAL', brw: 'BROWSER', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN', env: 'ENV CARD', ent: 'ENTERPRISE',
+  pay: 'PAYMENT', kyc: 'KYC' };
 const BANNER_H = 46;   // 请求券顶部的欢迎横幅：标题页那枚 Claude 徽记的小号版 + 「欢迎使用 Claude」装饰字样
 const ENT_BANNER_H = 30;   // 企业授权顶部的横幅：签发企业的图标（2 倍）+ 企业名称
 
@@ -13,7 +14,7 @@ function drawCorpIcon(x, y, key, k = 1, icon = corpOf(key).icon) {
   if (!corpCols.has(key)) corpCols.set(key, Object.fromEntries(Object.entries(corpOf(key).icon.cols).map(([ch, v]) => [ch, rgb(v)])));
   pattern(icon.pat, x, y, corpCols.get(key), k);
 }
-const SIGNER_COL = { cred: C.AMBER, api: C.GREEN };
+const SIGNER_COL = { cred: C.AMBER, api: C.GREEN, kyc: C.CYAN_L };
 // 标题栏右端的按钮（窗口内相对坐标）：应用（手册 / 通告 / 历史记录）有关闭钮，证件和通知只能最小化
 const CLOSE_BOX = (win) => [win.w - 12, 1, win.w - 2, TITLE_H - 2];
 const MIN_BOX = (win) => (win.closable ? [win.w - 24, 1, win.w - 14, TITLE_H - 2] : CLOSE_BOX(win));
@@ -67,7 +68,7 @@ function wrapDoc(s, size, width) {
 
 // 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
 // label 为空的行不登记审查栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
-// 行的第三项为 true 时，value 太长就折行印出来（令牌上的请求摘要）；整段仍算同一个审查栏位。
+// 行的第三项为 true 时，value 太长就折行印出来（浏览器令牌上的请求摘要）；整段仍算同一个审查栏位。
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
@@ -88,7 +89,7 @@ class Doc {
       this.rowY.push(y);
       y += this.wraps[i] ? this.wraps[i].length * 11 + 2 : 12;
     });
-    // 没有签名、也不能盖章的证件（令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
+    // 没有签名、也不能盖章的证件（浏览器令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
     this.plain = !sig && key !== 'cred' && key !== 'return';
     this.sealY = Math.max(top + (photo ? 46 : 0), y) + 3;
     this.h = this.plain ? y + 5 : this.sealY + 24;
@@ -148,8 +149,81 @@ class Doc {
   }
 }
 
+// KYC 证明（无尽模式难度 3）：仿照护照。上方左边是人像、右边是真实姓名 / 地区 / 住址 / 出生日期，
+// 下方是 KYC 更新记录（最新的在最上面），记录下方注明「KYC 记录三年内有效」，底部是第三方 KYC 服务商「人格有限公司」的核验签名（kyc.签名）。
+// 人像和真实姓名只是装饰，不登记审查栏位；整块更新记录是一个栏位（kyc.记录）
+const KYC_PORTRAIT = [
+  '......................', '.......HHHHHHHH.......', '......HHHHHHHHHH......', '.....HHHHHHHHHHHH.....',
+  '.....HHSSSSSSSSHH.....', '.....HSSSSSSSSSSH.....', '.....HSSESSSSESSH.....', '.....SSSSSSSSSSSS.....',
+  '......SSSSSSSSSS......', '......SSSSMMSSSS......', '.......SSSSSSSS.......', '........SSSSSS........',
+  '.........SSSS.........', '......CCCSSSSCCC......', '...CCCCCCCSSCCCCCCC...', '..CCCCCCCCCCCCCCCCCC..',
+  '.CCCCCCCCCCCCCCCCCCCC.', '.CCCCCCCCCCCCCCCCCCCC.', '.CCCCCCCCCCCCCCCCCCCC.', '.CCCCCCCCCCCCCCCCCCCC.',
+  '.CCCCCCCCCCCCCCCCCCCC.', '.CCCCCCCCCCCCCCCCCCCC.',
+];
+const KYC_LOOKS = {
+  H: [[40, 30, 26], [120, 80, 40], [200, 170, 90], [70, 70, 76]],
+  S: [[236, 200, 170], [210, 160, 120], [150, 100, 70], [96, 64, 48]],
+  C: [[60, 90, 140], [120, 50, 60], [70, 110, 80], [90, 90, 100]],
+};
+class KycDoc {
+  constructor(d) {
+    Object.assign(this, { key: 'kyc', title: DOC_NAMES.kyc, sub: DOC_SUBS.kyc, name: d.姓名, recs: d.记录, sig: d.sig, w: 184, vx: 54 });
+    this.cols = { E: K.INK, M: rgb([150, 70, 70]) };
+    ['H', 'S', 'C'].forEach((ch, i) => { this.cols[ch] = rgb(KYC_LOOKS[ch][d.look[i]]); });
+    this.rows = [['地区', d.地区], ['住址', d.住址, true], ['出生日期', d.出生日期]];
+    this.kx = Math.max(34, ...this.rows.map(([k]) => tw(k, 8) + 8));
+    const avail = this.w - this.vx - this.kx - 6;
+    this.wraps = this.rows.map(([, v, multi]) => (multi ? wrapDoc(v, 10, avail) : null));
+    this.fields = {};
+    // 真实姓名（装饰）在第一行，下面才是可审查的栏位
+    let y = TITLE_H + 16;
+    this.rowY = this.rows.map(([k], i) => {
+      const y0 = y, bh = this.wraps[i] ? this.wraps[i].length * 11 + 1 : 11;
+      this.fields[`kyc.${k}`] = [this.vx, y0 - 2, this.w - 3, y0 + bh - 2];
+      y += bh + 1;
+      return y0;
+    });
+    this.recY = Math.max(TITLE_H + 52, y + 3);
+    const top = this.recY + 13;
+    this.fields['kyc.记录'] = [3, top - 2, this.w - 4, top + this.recs.length * 12 - 1];
+    // 更新记录下面注明有效期，再下面是「人格有限公司」的核验签名：仿照护照的签发栏
+    this.noteY = top + this.recs.length * 12 + 4;
+    this.sigY = this.noteY + 16;
+    if (this.sig) this.fields['kyc.签名'] = [3, this.sigY - 2, this.w - 4, this.sigY + 21];
+    this.h = this.sig ? this.sigY + 23 : this.noteY + 14;
+  }
+
+  draw(x, y) {
+    const { w, vx } = this;
+    winChrome(x, y, w, this.h, this.title, this.sub, K.CYAN_D, rgb([18, 52, 56]));
+    frame(x + 4, y + TITLE_H + 3, x + 49, y + TITLE_H + 48, K.LINE_L, K.INK);
+    pattern(KYC_PORTRAIT, x + 5, y + TITLE_H + 4, this.cols, 2);
+    txt(x + vx + 2, y + TITLE_H + 3, this.name, tw(this.name, 10) > w - vx - 6 ? 8 : 10, K.WHITE);
+    this.rows.forEach(([k, v], i) => {
+      const yy = y + this.rowY[i];
+      txt(x + vx + 2, yy, k, 8, K.DIM);
+      if (this.wraps[i]) this.wraps[i].forEach((s, j) => txt(x + vx + this.kx, yy - 1 + j * 11, s, 10, K.TEXT));
+      else txt(x + vx + this.kx, yy - 1, v, 10, K.TEXT);
+    });
+    rect(x + 4, y + this.recY - 3, x + w - 5, y + this.recY - 3, K.GRID);
+    txt(x + 6, y + this.recY, 'KYC 更新记录', 8, K.CYAN);
+    this.recs.forEach((r, i) => {
+      const yy = y + this.recY + 13 + i * 12;
+      outline(x + 8, yy - 1, x + 13, yy + 6, K.GREEN);
+      txt(x + 20, yy - 1, r, 10, K.TEXT);
+      txt(x + w - 8, yy, '身份核验通过', 8, K.GREEN, 'ra');
+    });
+    rect(x + 4, y + this.noteY - 3, x + w - 5, y + this.noteY - 3, K.GRID);
+    txt(x + w / 2, y + this.noteY, 'KYC 记录三年内有效', 8, K.CYAN_L, 'ma');
+    if (this.sig) {
+      rect(x + 4, y + this.sigY - 4, x + w - 5, y + this.sigY - 4, K.GRID);
+      drawSeal(x + 6, y + this.sigY, 'kyc', this.sig);
+    }
+  }
+}
+
 // 《宪法与规则手册》：封面、目录、基本条例、支持地区、企业名录、签名详情、版权页、封底；底部一排书签直接跳到各章。
-// 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有令牌就不列语言 / 时区。
+// 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有浏览器令牌就不列语言 / 时区。
 // 每页正文排到 PAGE_BOTTOM 就翻到续页（续页重复章节标题），窗口高度不会跟着内容一直长高。
 const MARK_H = 12;
 const PAGE_BOTTOM = 138;   // 单页正文的下限；再长就分页
@@ -216,7 +290,7 @@ class Rulebook {
       if (r.hidden) continue;
       if (ry > rulesBody && !fits(ry, 15)) newRulesPage();
       const y0 = ry;
-      // 令牌只印语言、也没有环境信息卡时（无尽模式难度 1），条例只提语言；看得到时区（难度 2）才写「语言和时区」
+      // 浏览器令牌只印语言、也没有环境信息卡时（无尽模式难度 1），条例只提语言；看得到时区（难度 2）才写「语言和时区」
       const headText = r.key === 'locale' && !tzShown(rs) ? '语言须与地区一致' : r.head;
       rules.rows.push({ s: headText, y: ry, col: K.CYAN });
       ry += 12;
@@ -227,11 +301,13 @@ class Rulebook {
     // —— 二、支持地区：按大洲排；整章排不下就续页，续页重复栏位表头 ——
     const regionPages = [];
     let regions = null, gy = 0, gTop = 0, gBody = 0;
-    // 支持地区页只列出真的印在证件上的对照栏位：令牌上的语言；时区印在令牌或环境信息卡（难度 2）上才列
+    // 支持地区页只列出真的印在证件上的对照栏位：浏览器令牌上的语言；时区印在浏览器令牌或环境信息卡（难度 2）上才列
     const tokCols = [];
-    if (rs.tok && (rs.tokRows || TOK_ROWS_ALL).includes('语言')) tokCols.push('语言');
+    if (rs.brw && (rs.tokRows || TOK_ROWS_ALL).includes('语言')) tokCols.push('语言');
     if (tzShown(rs)) tokCols.push('时区');
-    const COL_X = { 地区: 14, 语言: 84, 时区: 140 };
+    // 难度 3：支付凭证上的手机号要对凭证地区，多列一栏国家区号（四栏时整体往左挤）
+    if (rs.pay) tokCols.push('区号');
+    const COL_X = rs.pay ? { 地区: 10, 语言: 62, 时区: 110, 区号: 168 } : { 地区: 14, 语言: 84, 时区: 140 };
     const endRegionPage = () => {
       // 「支持地区」的每一页都是地区条例的参照；请求券条例留在「基本条例」页
       if (regions) regions.fields['rule.region'] = [3, gTop - 2, this.w - 4, Math.min(gy, PAGE_BOTTOM) - 2];
@@ -259,9 +335,10 @@ class Rulebook {
           gy += 11;
         }
         const [lang, tz] = REGION_LOCALE[r];
-        regions.rows.push({ s: r, y: gy, col: K.TEXT, x: 14 });
-        if (tokCols.includes('语言')) regions.rows.push({ s: lang, y: gy, col: K.TEXT, x: 84 });
-        if (tokCols.includes('时区')) regions.rows.push({ s: tz, y: gy, col: K.TEXT, x: 140 });
+        regions.rows.push({ s: r, y: gy, col: K.TEXT, x: COL_X.地区 });
+        if (tokCols.includes('语言')) regions.rows.push({ s: lang, y: gy, col: K.TEXT, x: COL_X.语言 });
+        if (tokCols.includes('时区')) regions.rows.push({ s: tz, y: gy, col: K.TEXT, x: COL_X.时区 });
+        if (tokCols.includes('区号')) regions.rows.push({ s: PHONE_CC[r], y: gy, col: K.TEXT, x: COL_X.区号 });
         gy += 10;
       }
       gy += 3;
@@ -284,9 +361,10 @@ class Rulebook {
       entPage.fields['book.ent'] = [3, top - 4, this.w - 4, ey - 4];
     }
 
-    // —— 四、签名详情：只有凭证和 API 授权带签名；令牌没有签名，所以不列 ——
+    // —— 四、签名详情：凭证、API 授权和 KYC 证明带签名；浏览器令牌没有签名，所以不列 ——
     // 没有企业名录（无尽模式难度 1）时，签名详情往前挪成第三章
-    const sealNo = rs.ent ? '四' : '三';
+    const CH_NO = '一二三四五六';
+    const sealNo = CH_NO[rs.ent ? 3 : 2];
     const sealPages = [];
     let seals = null, sy = 0, sealsBody = 0;
     const newSealsPage = () => {
@@ -296,11 +374,11 @@ class Rulebook {
       sealsBody = sy;
     };
     newSealsPage();
-    for (const key of ['cred', 'api']) {
-      if (sy > sealsBody && !fits(sy, 36)) newSealsPage();
+    for (const key of ['cred', 'api', 'kyc'].filter((k) => k !== 'kyc' || rs.kyc)) {
+      if (sy > sealsBody && !fits(sy, 35)) newSealsPage();
       seals.rows.push({ s: DOC_NAMES[key], y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
-      seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 31];
-      sy += 36;
+      seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 30];
+      sy += 35;
     }
 
     mid(owner, 52, '本手册所有权属于', 8, K.DIM);
@@ -317,14 +395,16 @@ class Rulebook {
     mid(back, 126, '严厉处罚', 8, K.RED);
 
     // 页面顺序：封面 → 目录 → 各章（条例 → 地区 → 企业 → 签名，长章带续页）→ 版权页 → 封底
-    this.pages = [cover, toc].concat(rulesPages, regionPages, rs.ent ? [entPage] : [], rs.seals ? sealPages : [], [owner, back]);
+    this.pages = [cover, toc].concat(rulesPages, regionPages, rs.ent ? [entPage] : [],
+      rs.seals ? sealPages : [], [owner, back]);
     this.npages = this.pages.length;
     // 所有分页共用同一个高度：正文最长只排到 PAGE_BOTTOM，窗口不再随内容长高
     this.h = Math.max(140, PAGE_BOTTOM) + MARK_H + 2;
 
     // 目录只列章节的第一页，页码就是该章在手册里的第一页
     let y = head(toc, '目录');
-    [['一、基本条例', rulesPages[0]], ['二、支持地区', regionPages[0]], ['三、企业名录', entPage], [`${sealNo}、签名详情`, sealPages[0]]]
+    [['一、基本条例', rulesPages[0]], ['二、支持地区', regionPages[0]], ['三、企业名录', entPage],
+      [`${sealNo}、签名详情`, sealPages[0]]]
       .filter(([, pg]) => pg && this.pages.includes(pg))
       .forEach(([s, pg]) => {
         toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
@@ -580,8 +660,8 @@ class NoticeWindow {
 }
 
 // 历史记录：当前这段对话（下一个请求进来时清空）。
-// 请求内容那一句是可审查栏位（hist.请求），可以和令牌上的请求摘要（tok.请求）
-// 或 API 授权的用途核对；没有令牌时本人不会说明来意，也就没有这一句。
+// 请求内容那一句是可审查栏位（hist.请求），可以和浏览器令牌上的请求摘要（tok.请求）
+// 或 API 授权的用途核对；没有浏览器令牌时本人不会说明来意，也就没有这一句。
 class HistoryLog {
   constructor(chat) {
     this.chat = chat;   // 直接引用 D.chat：新请求时清空、对话时实时追加

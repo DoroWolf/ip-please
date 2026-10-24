@@ -244,12 +244,12 @@ with sync_playwright() as p:
     dateRel = page.evaluate("""(() => {
       let s;
       do { s = makeRequest(today(), 0, D.wanted, rules()); }
-      while (!(s.docs.some((d) => d.key === 'cred') && s.docs.some((d) => d.key === 'tok' && d.fields['tok.签发'])));
+      while (!(s.docs.some((d) => d.key === 'cred') && s.docs.some((d) => d.key === 'brw' && d.fields['brw.签发'])));
       const e = { handed: true, leaving: false, spec: s };
       const key = (a, b) => [a, b].sort().join('|');
       return {
         expiry: compareOutcome(e, key('cred.有效期', 'notice.date')).kind,
-        issued: compareOutcome(e, key('tok.签发', 'notice.date')).kind,
+        issued: compareOutcome(e, key('brw.签发', 'notice.date')).kind,
         dates: compareOutcome(e, key('notice.date', 'sys.日期')).kind,
       };
     })()""")
@@ -341,7 +341,7 @@ with sync_playwright() as p:
     page.evaluate("setInspect(false)")
     # 柜台证件溢出：指针贴在左右边缘时自动滚动
     page.evaluate("""(() => {
-      for (let i = 0; i < 6; i++) D.icons.push({ win: new Doc('tok', [['语言', '日本語']], null) });
+      for (let i = 0; i < 6; i++) D.icons.push({ win: new Doc('brw', [['语言', '日本語']], null) });
       layoutIcons();
     })()""")
     page.mouse.move(205, 336)

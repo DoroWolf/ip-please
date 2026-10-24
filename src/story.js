@@ -14,7 +14,7 @@ const STORY = [
   // 但签名详情页（seals）与「签名造假」的题（flaws 里的 'sig'）留到之后的日子
   {
     rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '仅限美国和英国地区访问' }],
-    continents: [['北美洲', ['美国']], ['欧洲', ['英国']]], seals: false, regions: ['美国', '美国', '英国'], tok: false, kinds: ['chat'],
+    continents: [['北美洲', ['美国']], ['欧洲', ['英国']]], seals: false, regions: ['美国', '美国', '英国'], brw: false, kinds: ['chat'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region'], legit: 0, wanted: false, redTeam: false,
     inspect: false,
     notice: '欢迎你来到安全网关检查点的新岗位报到。\n\n将凭证拖到右侧盖章，然后返还凭证给用户。\n\n仅限美国与英国用户请求。\n\n拒绝所有其他地区的请求。',
@@ -30,8 +30,8 @@ const STORY = [
   // 第二天：条例换成「地区 + 有效期」，桌面开放『审查』；凭证仍是唯一证件，请求都是对话
   {
     rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'date', head: '所有证件须为当前有效' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp'], legit: 0, wanted: false, redTeam: false,
+    continents: CONTINENTS, seals: false, regions: REGIONS_OK, brw: false, kinds: ['chat'],
+    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'brw'], legit: 0, wanted: false, redTeam: false,
     inspect: true,
     notice: '从今日起，允许通过带有有效凭证的请求。\n\n你的网关现已安装审查能力。\n\n认真检查凭证所有信息是否存在不符事项。拒绝任何含不一致信息的请求。',
     pages: [
@@ -52,8 +52,8 @@ const STORY = [
   // 无券或逾期才拦，凭证地区不在支持地区的请求仍按「地区不支持」直接拒绝
   {
     rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '凭证地区须为支持地区' }, { key: 'voucher', head: '外国请求须持有效请求券' }, { key: 'date', head: '所有证件须为当前有效' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: false, kinds: ['chat'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp', 'no_voucher'], legit: 0, wanted: false,
+    continents: CONTINENTS, seals: false, regions: REGIONS_OK, brw: false, kinds: ['chat'],
+    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'brw', 'no_voucher'], legit: 0, wanted: false,
     redTeam: false, redGuards: true, inspect: true, voucher: true, foreign: 0.5,
     notice: '昨日网关前发生严重请求堵塞事故。\n\n除美国和英国以外，其余支持地区的请求须持有效“请求券”。\n\n核实相应信息后给凭证盖章，并返还所有证件给用户。',
     pages: [
@@ -70,33 +70,33 @@ const STORY = [
       icon: 'gate',
     },
   },
-  // 第四天：请求券作废，改用安全部会话中心签发的「令牌」——登记 IP、运营商、签发日期、有效期与请求摘要，
+  // 第四天：请求券作废，改用安全部会话中心签发的「浏览器令牌」——登记 IP、运营商、签发日期、有效期与请求摘要，
   // 没有语言、时区，也没有签名（凭证本身仍带签名）。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
   {
-    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示浏览器令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '所有证件须为当前有效' }, { key: 'match', head: '证件上的 IP 须与本人一致' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
+    continents: CONTINENTS, seals: false, regions: REGIONS_OK, brw: true, kinds: ['chat'],
     tokRows: ['IP', '运营商', '签发', '有效期'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp', 'ip', 'no_tok'], legit: 0,
+    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'brw', 'ip', 'no_tok'], legit: 0,
     wanted: false, redTeam: false, redGuards: true, inspect: true, voucher: false, foreign: 0,
-    notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器令牌”。\n\n请求券不再有效。',
+    notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器浏览器令牌”。\n\n请求券不再有效。',
     pages: [
       { body: '详细检查所有信息\n\n拒绝任何所持证件不符要求的请求。\n\n参考“历史记录”，用以关联用户的陈述。' },
     ],
     news: {
       h1: '请求券作废',
-      sub: '安全部：请求券作废，改用浏览器令牌；令牌登记 IP、运营商、签发日期、有效期与请求摘要',
+      sub: '安全部：请求券作废，改用浏览器浏览器令牌；浏览器令牌登记 IP、运营商、签发日期、有效期与请求摘要',
       h2: '发言人：要记的栏位越少，出错的地方就越少',
     },
   },
   // 第五天：拘留权限开放。左上的红队 clawd 进驻，审查出 IP 不符 / 签发日期在未来（伪造证件）后可以拘留；证件过期只能拒绝
   {
-    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
+    rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示浏览器令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '所有证件须为当前有效' }, { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
       { key: 'match', head: '证件上的 IP 须与本人一致' }],
-    continents: CONTINENTS, seals: false, regions: REGIONS_OK, tok: true, kinds: ['chat'],
+    continents: CONTINENTS, seals: false, regions: REGIONS_OK, brw: true, kinds: ['chat'],
     tokRows: ['IP', '运营商', '签发', '有效期'],
-    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'exp', 'ip', 'no_tok', 'future'], legit: 0,
+    credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'brw', 'ip', 'no_tok', 'future'], legit: 0,
     wanted: false, redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0,
     notice: '你现已被授权可拘留非法请求。\n\n对异常事项进行询问以开启拘留选项。',
     pages: [
