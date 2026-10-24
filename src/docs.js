@@ -3,8 +3,12 @@
 // 每种窗口知道自己的尺寸、怎么画、各栏位的相对坐标（审查模式用）。
 
 const TITLE_H = 12;
-const DOC_SUBS = { cred: 'CREDENTIAL', brw: 'BROWSER', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN', env: 'ENV CARD', ent: 'ENTERPRISE',
-  pay: 'PAYMENT', kyc: 'KYC' };
+const DOC_SUBS = { cred: 'CREDENTIAL', brw: 'BROWSER', api: 'API ACCESS', voucher: 'REQUEST PASS', return: 'TEMP RETURN', env: 'ENVIRONMENT', ent: 'ENTERPRISE',
+  pay: 'PAYMENT', kyc: 'KYC', idc: 'IDENTITY' };
+// 证件栏位之间的虚线分隔：rows 里插入这一项就画一条虚线，把栏位分成几类（身份信息卡的连线 / 环境 / 支付 / 效期）
+const DOC_SEP = { sep: true };
+const DOC_SEP_H = 8;
+const isDocSep = (r) => r === DOC_SEP;
 const BANNER_H = 46;   // 请求券顶部的欢迎横幅：标题页那枚 Claude 徽记的小号版 + 「欢迎使用 Claude」装饰字样
 const ENT_BANNER_H = 30;   // 企业授权顶部的横幅：签发企业的图标（2 倍）+ 企业名称
 
@@ -31,6 +35,17 @@ function winChrome(x, y, w, h, title, sub, col, colD, closable = false) {
   if (closable) txt(x + w - 7, y + 2, '×', 8, K.WHITE, 'ma');
 }
 
+// 拒绝理由章（难度 3 起）：盖上去后证件底部多出一条，印着拒绝理由（询问过的异常）。
+// 用橙色而不是拒绝的红色：它只是附注，不参与主决定（先盖理由、验证 SMS 后改放行也不会算事故）
+const REASON_STRIP = 28;
+function drawReasonStamp(x, y, w, reason) {
+  frame(x, y, x + w - 1, y + REASON_STRIP - 4, K.CLAUDE_L, rgba(C.CLAUDE, 0.18));
+  txt(x + w / 2, y + 3, '拒绝理由', 8, K.CLAUDE_L, 'ma');
+  let s = reason;
+  while (s && tw(s, 8) > w - 8) s = s.slice(0, -1);
+  txt(x + w / 2, y + 13, s === reason ? s : `${s.slice(0, -1)}…`, 8, K.WHITE, 'ma');
+}
+
 // 盖在凭证上的决定章
 function drawStamp(x, y, kind) {
   const [col, colD] = kind === 'approve' ? [C.GREEN, C.GREEN_D] : [C.RED, C.RED_D];
@@ -41,8 +56,9 @@ function drawStamp(x, y, kind) {
 
 // 数字签名：图案 + 签发机构 + 签名（证件上和手册里画法一样，方便对照）
 function drawSeal(x, y, key, sig) {
-  const col = rgb(SIGNER_COL[key]);
-  frame(x, y, x + 19, y + 19, col, rgba(SIGNER_COL[key], 0.12));
+  const sc = SIGNER_COL[sealKey(key)];   // 身份信息卡借用凭证的签名式样
+  const col = rgb(sc);
+  frame(x, y, x + 19, y + 19, col, rgba(sc, 0.12));
   pattern(SEAL_GLYPHS[sig.glyph], x + 3, y + 3, { X: col }, 2);
   txt(x + 25, y + 1, sig.issuer, 8, K.TEXT);
   txt(x + 25, y + 11, `签名 ${sig.print}`, 8, K.DIM);
@@ -69,25 +85,27 @@ function wrapDoc(s, size, width) {
 // 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
 // label 为空的行不登记审查栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
 // 行的第三项为 true 时，value 太长就折行印出来（浏览器令牌上的请求摘要）；整段仍算同一个审查栏位。
+// rows 里可以插 DOC_SEP：只画一条虚线，不算栏位、不登记审查范围（身份信息卡用它把栏位分类）。
 class Doc {
   constructor(key, rows, sig, photo = null) {
     Object.assign(this, { key, rows, sig, photo, title: DOC_NAMES[key], sub: DOC_SUBS[key] });
-    this.w = photo ? 184 : 164;
+    // 身份信息卡（难度 4）栏位多，放宽一些，少折几行
+    this.w = key === 'idc' ? 200 : photo ? 184 : 164;
     this.vx = photo ? 54 : 4;
     // 请求券 / 企业授权顶上多一条横幅，下面的栏位整体往下让出横幅的高度
     this.bannerH = key === 'voucher' ? BANNER_H : key === 'ent' ? ENT_BANNER_H : 0;
     this.banner = this.bannerH > 0;
     const top = TITLE_H + 4 + this.bannerH;
     // 栏位值从标签右边开始：标签较长（企业授权的「授权企业」）时整列往右让
-    this.kx = Math.max(34, ...rows.map(([k]) => (k ? tw(k, 8) + 8 : 0)));
+    this.kx = Math.max(34, ...rows.map((r) => (!isDocSep(r) && r[0] ? tw(r[0], 8) + 8 : 0)));
     // 折行的行先算好每行文字（10px），下面的行高、签名线和审查栏位都跟着变
     const avail = this.w - this.vx - this.kx - 6;
-    this.wraps = rows.map(([, v, multi]) => (multi && v ? wrapDoc(String(v), 10, avail) : null));
+    this.wraps = rows.map((r) => (!isDocSep(r) && r[2] && r[1] ? wrapDoc(String(r[1]), 10, avail) : null));
     this.rowY = [];
     let y = top;
     rows.forEach((r, i) => {
       this.rowY.push(y);
-      y += this.wraps[i] ? this.wraps[i].length * 11 + 2 : 12;
+      y += isDocSep(r) ? DOC_SEP_H : this.wraps[i] ? this.wraps[i].length * 11 + 2 : 12;
     });
     // 没有签名、也不能盖章的证件（浏览器令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
     this.plain = !sig && key !== 'cred' && key !== 'return';
@@ -97,12 +115,18 @@ class Doc {
     if (photo) this.fields[`${key}.照片`] = [4, TITLE_H + 3, 49, TITLE_H + 48];
     // 企业授权的横幅就是「签发企业」这一栏
     if (key === 'ent') this.fields['ent.企业'] = [4, TITLE_H + 2, this.w - 5, TITLE_H + ENT_BANNER_H - 1];
-    rows.forEach(([k], i) => {
-      if (!k) return;   // 没有标签的行只是版面文字（临时返回页），不参与审查
+    rows.forEach((r, i) => {
+      if (isDocSep(r) || !r[0]) return;   // 虚线不是栏位；没有标签的行只是版面文字（临时返回页），不参与审查
       const bh = this.wraps[i] ? this.wraps[i].length * 11 + 1 : 11;
-      this.fields[`${key}.${k}`] = [this.vx, this.rowY[i] - 2, this.w - 3, this.rowY[i] + bh - 2];
+      this.fields[`${key}.${r[0]}`] = [this.vx, this.rowY[i] - 2, this.w - 3, this.rowY[i] + bh - 2];
     });
     if (sig) this.fields[`${key}.签名`] = [3, this.sealY - 2, this.w - 4, this.h - 3];
+  }
+
+  // 加盖拒绝理由章：第一次盖时证件往下长出一条；再盖就换成新的理由
+  setReason(reason) {
+    if (!this.reason) this.h += REASON_STRIP;
+    this.reason = reason;
   }
 
   // 请求券的欢迎横幅：左边是标题页那枚徽记的小号版（33px，上下留边距），右边是装饰字样
@@ -135,8 +159,10 @@ class Doc {
       frame(x + 4, y + TITLE_H + 3, x + 49, y + TITLE_H + 48, K.LINE_L, K.INK);
       spr(this.photo, x + 5, y + TITLE_H + 4, 2);
     }
-    this.rows.forEach(([k, v], i) => {
+    this.rows.forEach((r, i) => {
       const yy = y + this.rowY[i];
+      if (isDocSep(r)) { dashLine(x + 5, yy + 2, x + w - 6, yy + 2, K.LINE); return; }
+      const [k, v] = r;
       if (!k) { txt(x + w / 2, yy, v, 10, K.TEXT, 'ma'); return; }   // 无标签：整行居中
       txt(x + vx + 2, yy, k, 8, K.DIM);
       const lines = this.wraps[i];
@@ -146,6 +172,7 @@ class Doc {
     if (!this.plain) rect(x + 4, y + this.sealY - 3, x + w - 5, y + this.sealY - 3, K.GRID);
     if (this.sig) drawSeal(x + 6, y + this.sealY + 1, this.key, this.sig);
     if (this.stamp) drawStamp(x + w - 50, y + this.sealY + 1, this.stamp);
+    if (this.reason) drawReasonStamp(x + 4, y + h - REASON_STRIP, w - 8, this.reason);
   }
 }
 
@@ -377,7 +404,9 @@ class Rulebook {
     newSealsPage();
     for (const key of ['cred', 'api', 'kyc'].filter((k) => k !== 'kyc' || rs.kyc)) {
       if (sy > sealsBody && !fits(sy, 35)) newSealsPage();
-      seals.rows.push({ s: DOC_NAMES[key], y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
+      // 难度 4 的身份信息卡和凭证共用安全部会话中心的签名：同一枚式样，标题一起列出
+      const label = key === 'cred' && rs.idc ? `${DOC_NAMES.cred} / ${DOC_NAMES.idc}` : DOC_NAMES[key];
+      seals.rows.push({ s: label, y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
       seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 30];
       sy += 35;
     }

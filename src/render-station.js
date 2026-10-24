@@ -12,6 +12,8 @@ function drawDesk() {
   drawScreen();
   if (D.insp.on) drawInspect();
   drawBanner();
+  // 拒绝理由章的抽屉盖在审查横幅上面；拖着证件去盖章时，证件再画在抽屉上面
+  if (drawReasonTray() && draggingWin()) drawWins(draggingWin());
   if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true);
   if (drag && drag.type === 'win' && drag.inst.out && (drag.inst.kind === 'doc' || drag.inst.kind === 'smsf')) docIcon(ptr.x - 8, ptr.y - 6, true);
   if (D.intro !== null) drawIntro();
@@ -150,7 +152,7 @@ function drawPipe() {
 
 // —— 左下：审查窗 ——
 // 柜台图标下的短名：证件名太长的换成简称（图标间距只有 32px）
-const ICON_LABELS = { brw: '浏览器', api: 'API', return: '返回票', env: '环境卡', ent: '企业', pay: '支付', kyc: 'KYC' };
+const ICON_LABELS = { brw: '浏览器', api: 'API', return: '返回票', env: '环境卡', ent: '企业', pay: '支付', kyc: 'KYC', idc: '身份' };
 function drawReview() {
   const [x0, y0, x1, y1] = REVIEW;
   rect(x0, y0, x1, y1, K.BG);
@@ -395,6 +397,33 @@ function drawTray() {
   G.restore();
 }
 
+// 拒绝理由章的抽屉：收起时只在桌面左上角露出把手，拉下来是一格「拒绝理由」。没有可用的理由时整个不画
+function drawReasonTray() {
+  updateReasonTray();
+  if (!reasonReady(D.ent) || D.insp.on) return false;
+  const [x0, y0, x1, y1] = reasonPanel();
+  const dy = y0 - REASON_BOX[1];
+  clipScreen();
+  const [tx0, ty0, tx1, ty1] = REASON_TAB;
+  frame(tx0, ty0 + dy - 1, tx1, ty1 + dy, K.CLAUDE_L, K.PANEL_L);
+  txt(((tx0 + tx1) >> 1) + 4, ty0 + dy + 1, '拒绝理由', 8, K.CLAUDE_L, 'ma');
+  // 往下拉的小箭头（字库里没有 ▼，直接画）
+  for (let i = 0; i < 3; i++) rect(tx0 + 6 + i, ty0 + dy + 3 + i, tx0 + 10 - i, ty0 + dy + 3 + i, K.CLAUDE_L);
+  if (D.reasonTray.u > 0) {
+    frame(x0, y0 - 4, x1, REASON_BOX[3] + dy, K.LINE_L, K.PANEL);
+    const win = draggedWin();
+    const holding = win && isStampDoc(win) && D.ent.spec.docs.includes(win);
+    const [zx0, zy0, zx1, zy1] = REASON_ZONE;
+    const over = holding && inBox(ptr.x, ptr.y, REASON_ZONE);
+    // 橙色 = 拒绝理由的附注，和红色 / 绿色的主决定章区分开
+    frame(zx0, zy0 + dy, zx1, zy1 + dy, K.CLAUDE_L, over ? rgba(C.CLAUDE, 0.35) : rgba(C.CLAUDE, holding ? 0.22 : 0.12));
+    txt((zx0 + zx1) >> 1, zy0 + dy + 9, '拒绝理由', 12, K.CLAUDE_L, 'ma');
+    txt((zx0 + zx1) >> 1, zy0 + dy + 26, 'REASON', 8, K.DIM, 'ma');
+  }
+  G.restore();
+  return true;
+}
+
 // 审查模式：整个下方压暗，只留下可点的栏位（和『审查』图标）
 let OVERLAY = null;
 function drawInspect() {
@@ -439,13 +468,14 @@ function drawBanner() {
   const b = D.insp.banner;
   if (!b || (b.kind !== 'bad' && now - b.t > 1.6)) return false;
   const col = b.kind === 'bad' ? K.RED : b.kind === 'ok' ? K.GREEN : K.DIM;
-  frame(...BANNER_BOX, col, K.INK);
-  txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 4, b.title, 10, col);
-  txt(BANNER_BOX[0] + 8, BANNER_BOX[1] + 17, b.sub, 8, K.TEXT);
+  const box = bannerBox();
+  frame(...box, col, K.INK);
+  txt(box[0] + 8, box[1] + 4, b.title, 10, col);
+  txt(box[0] + 8, box[1] + 17, b.sub, 8, K.TEXT);
   const e = D.ent;
   if (b.ok && e && !e.leaving) {
     const asked = e.asked.has(b.issue);   // 问过的异常固定为已按下；审查出新异常才会重新变成询问
-    button(ASK_BTN, asked ? '已询问' : '询问', K.AMBER, { size: 8, off: asked });
+    button(askBtn(), asked ? '已询问' : '询问', K.AMBER, { size: 8, off: asked });
   }
   return true;
 }

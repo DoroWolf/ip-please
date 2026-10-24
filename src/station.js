@@ -22,6 +22,12 @@ const INSPECT_ICON = APP_BOX.insp;
 // 右侧决定栏：指针碰到桌面右边缘时滑出；把凭证拖进 放行 / 拒绝 栏即做出决定
 const TRAY_W = 72, TRAY_BOX = [W - TRAY_W, 154, W - 1, 270], TRAY_HOT = [W - 10, 119, W - 1, 343];
 const STAMP_ZONES = { approve: [W - 66, 160, W - 6, 210], deny: [W - 66, 216, W - 6, 264] };
+// 拒绝理由章（难度 3 起）：询问过异常后，桌面左上角多出一个往下拉的抽屉；指针碰到把手就拉下来，
+// 把凭证（或临时返回页）拖进去加盖拒绝理由。REASON_BOX 是完全拉下时的面板（把手挂在面板下缘）
+const REASON_BOX = [SCREEN[0] + 4, 119, SCREEN[0] + 84, 168], REASON_TAB = [SCREEN[0] + 14, 169, SCREEN[0] + 74, 179];
+const REASON_ZONE = [REASON_BOX[0] + 6, REASON_BOX[1] + 5, REASON_BOX[2] - 6, REASON_BOX[3] - 5];
+const REASON_SLIDE = REASON_TAB[1] - REASON_BOX[1];   // 收起时整块往上收这么多，只露出把手
+const REASON_HOT = [SCREEN[0] + 1, 119, REASON_BOX[2], REASON_TAB[3] - REASON_SLIDE];
 const NEXT_BTN = [10, 322, 70, 348];   // 柜台第一个按钮：下一位 / 验证SMS / 请求嗅探 / 拘留共用
 const AVATAR_XY = [12, 136], AVATAR_K = 4, AVATAR_BOX = [10, 134, 101, 225];
 const RV_X = 110;
@@ -42,6 +48,11 @@ const GATE = [302, 44, 338, 88], LANE_Y = 66;   // 检查站窗口（防火墙�
 const QUEUE_GAP = 11, QUEUE_SLOTS = Math.floor((GATE[0] - 8) / QUEUE_GAP), QUEUE_CAP = 60;
 const SPLIT_X = 512;   // 放行向上、拒绝向下的分流口（右侧道路拉长后再分叉）
 const BANNER_BOX = [222, 122, 634, 150], ASK_BTN = [586, 127, 628, 145];
+// 有拒绝理由章的规则组：审查横幅往下让出左上角把手的位置
+const BANNER_DY = 10;
+const shiftY = (b, dy) => [b[0], b[1] + dy, b[2], b[3] + dy];
+const bannerBox = () => (rules().denyReason ? shiftY(BANNER_BOX, BANNER_DY) : BANNER_BOX);
+const askBtn = () => (rules().denyReason ? shiftY(ASK_BTN, BANNER_DY) : ASK_BTN);
 
 // —— 全局状态（各脚本共用） ——
 let canvasEl, F, now = 0;    // F：离屏画布（整帧先画在这里，再合成到屏幕）
@@ -85,7 +96,10 @@ const DIFFS = [
   {
     name: '难度 2', desc: '新增证件：环境信息卡、企业授权'},
   { name: '难度 3', desc: '新增证件：支付凭证、KYC 证明' },
+  { name: '难度 4', desc: '合并证件：身份信息卡' },
 ];
+// 难度 3 起，通告在「翻阅规则手册…」之后多一句
+const DENY_REASON_NOTE = '拒绝请求时需附上拒绝理由。';
 const TIMED_LEN = 600, DAY_LEN = 120, DAY_LEN_LATE = 180, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
 const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
 const SUSPEND_SEC = 5, SUSPEND_PTS = 2;             // 拘留奖励：限时模式 +5 秒，耐力模式该单共得 2 分
@@ -111,7 +125,7 @@ const storyDayLen = () => (lateStory() ? DAY_LEN_LATE : DAY_LEN);
 const hotThrottle = () => RUN.mode === 'story' && RUN.hot > 0 && RUN.day >= HOT_EARLY_FROM_DAY;
 const shiftEndMin = () => SHIFT_START_MIN + shiftSpan() - (hotThrottle() ? HOT_EARLY_MIN : 0);
 const mode = () => MODES[RUN.mode];
-// 世界观日期：故事模式逐日推进；无尽模式按难度（难度 1 = 2078.01.01，难度 2 = 2078.01.02，难度 3 = 2078.01.03）
+// 世界观日期：故事模式逐日推进；无尽模式按难度（难度 1 = 2078.01.01，难度 2 = 2078.01.02，难度 3 = 2078.01.03，难度 4 = 2078.01.04）
 const today = () => (RUN.mode === 'story' ? addDays(STORY_DATE, RUN.day - 1) : worldDate(RUN.diff));
 // 故事模式当天的内容（条例、通告、报纸）；规则组：无尽模式按难度用全套
 const storyDay = () => STORY[Math.min(RUN.day, STORY.length) - 1];
@@ -132,7 +146,7 @@ function startShift() {
     insp: { on: false, sel: [], banner: null }, gateT: -9,
     closing: false, over: false, ended: false,
     pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
-    intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now, pin: false }, arrest: null,
+    intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now, pin: false }, reasonTray: { open: false, u: 0, last: now }, arrest: null,
     paused: false, pauseAt: 0, iconScroll: 0, iconT: now, tips: {},
   };
   // 完美模式：分数右侧常驻显示这一单的加分（开局 +10，之后每过一分钟降一分）
@@ -151,7 +165,7 @@ function startShift() {
   D.notice = RUN.mode === 'story'
     ? new OfficialNotice(fmtDate(today()), { body: rs.notice, sig: !!rs.sig, pages: rs.pages, news: rs.news, wanted: D.wanted })
     : new OfficialNotice(fmtDate(today()), {
-      title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted,
+      title: `无尽 - ${M.name}`, body: rs.denyReason ? M.notice + DENY_REASON_NOTE : M.notice, wanted: D.wanted,
     });
   addWin(D.notice, 'notice', 316, 126);
 }
@@ -254,6 +268,21 @@ const measureAvailable = (e) => canSmsNow(e) || canSniffNow(e) || canSuspendNow(
 const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return');
 const stampDocOf = (e) => (e ? e.spec.docs.find((d) => isStampDoc(d)) : null);
 
+// 拒绝理由章：难度 3 起，询问过至少一个异常、手上有能盖章的证件时才拉得出来
+const reasonReady = (e) => !!e && !!rules().denyReason && e.asked.size > 0 && !e.leaving && !!stampDocOf(e);
+
+// 加盖拒绝理由：印上最近一次询问的异常；重新询问别的异常后再盖，就换成新的理由
+function stampReason() {
+  const e = D.ent;
+  if (!reasonReady(e) || RUN.fail) return;
+  const doc = stampDocOf(e);
+  const reason = [...e.asked].pop().title;
+  if (doc.reason === reason) return;
+  doc.setReason(reason);
+  D.hinted.reason = true;
+  SFX.play('stamp_deny');
+}
+
 // 凭证缺失：只有在「审查」出问题并按下『询问』之后，系统才派发临时返回页，直接放到桌面上代替凭证接受盖章
 function issueReturnTicket(e) {
   if (!e || e.leaving || stampDocOf(e)) return;   // 有凭证 / 已经派发过就不重复派发
@@ -334,7 +363,13 @@ function judge(e, kind) {
   // 拘留判定看这一单的主问题，也看同时存在的其他疑点（例如 DeepThink 的授权无效 + 地区不支持）；
   // spec.legit 的合规疑点即使查出了矛盾，也不能当成拘留理由。
   const suspendable = !spec.legit && (SUSPEND_FLAWS.includes(spec.flaw) || spec.issues.some((is) => SUSPEND_FLAWS.includes(is.type)));
-  const right = proceduralDeny || (kind === 'suspend' ? suspendable : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
+  // 主决定只看章是放行 / 拒绝 / 拘留；拒绝理由章是另外盖的附注，不参与这里
+  const decisionRight = proceduralDeny
+    || (kind === 'suspend' ? suspendable : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
+  // 难度 3 起：拒绝要加盖拒绝理由章。拒绝本身没错、却没盖理由章，同样算事故（缺少拒绝理由）。
+  // 只在最终决定是「拒绝」时检查：先盖理由、验证 SMS 后改放行，理由章不会把放行判成事故。
+  const noReason = kind === 'deny' && decisionRight && !!rules().denyReason && !(stamp && stamp.reason);
+  const right = decisionRight && !noReason;
   RUN.processed++; D.total++;
   // 放行：网关对通过的请求说一句标准招呼
   if (kind === 'approve') say('C', '欢迎使用 Claude。');
@@ -360,7 +395,7 @@ function judge(e, kind) {
   RUN.incidents++; RUN.streak = 0;
   RUN.cites++;
   const cite = citationLines(RUN.cites);
-  const lines = kind === 'approve'
+  const lines = noReason ? ['拒绝请求时未加盖拒绝理由：', '缺少拒绝理由'] : kind === 'approve'
     ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
     : kind === 'suspend' && spec.flaw !== null
       ? ['拘留了不得拘留的请求：', spec.reason]

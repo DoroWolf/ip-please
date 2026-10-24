@@ -27,7 +27,9 @@
 //          请求嗅探 'sniff.请求流量' / 'sniff.后台进程'（嗅探报告），
 //          难度 3：凭证 'cred.套餐'，支付凭证 'pay.IP' / 'pay.付款账户' / 'pay.账单地址' / 'pay.手机号'，
 //          KYC 证明 'kyc.出生地' / 'kyc.住址' / 'kyc.出生日期' / 'kyc.记录' / 'kyc.签名'（人像与真实姓名只是装饰，不登记栏位），
-//          手册 'rule.pay' / 'rule.billing' / 'rule.vcard' / 'rule.age'（'rule.kyc_date' 隐藏，不登记栏位）
+//          手册 'rule.pay' / 'rule.billing' / 'rule.vcard' / 'rule.age'（'rule.kyc_date' 隐藏，不登记栏位），
+//          难度 4：身份信息卡 'idc.*'（浏览器令牌 / 环境信息卡 / 支付凭证的栏位合并到一张卡上，见 mergeIdc；
+//                  卡面按 连线 / 请求 · 环境 · 支付 · 效期 四类排版，类别之间用虚线隔开，手机号始终有内容）/ 'idc.签名'（对照 'book.cred'）
 
 const WORLD_DATE = new Date(2078, 0, 1);   // 无尽模式难度 1 的世界观日期（难度 2 见 worldDate）
 
@@ -65,7 +67,7 @@ const KYC_REGIONS = Object.keys(REGION_LOCALE).filter((r) => r !== '朝鲜');
 
 // —— 数字签名：签名跟着签发机构走 ——
 // 凭证原本由安索兹卡身份局签发，现在改用安全部会话中心（原浏览器令牌）的签名；浏览器令牌没有签名；API 授权仍由安全部接口管理处签发；
-// KYC 证明由第三方「人格有限公司」核验签发
+// KYC 证明由第三方「人格有限公司」核验签发；难度 4 的身份信息卡和凭证一样由安全部会话中心签名（同一枚签名，见 sealKey）
 const SEAL_GLYPHS = {
   cred: ['XXXXXXX', '.X...X.', '..X.X..', '...X...', '..X.X..', '.X...X.', 'XXXXXXX'],
   api: ['XX...XX', 'X.....X', '..XXX..', '..X.X..', '..XXX..', 'X.....X', 'XX...XX'],
@@ -80,8 +82,10 @@ const SIGNERS = {
   api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
   kyc: { issuer: '人格有限公司', print: '2F9B-64D1', fakeIssuer: '人格服务有限公司' },
 };
+// 证件用的是哪一组签名：身份信息卡借用凭证（安全部会话中心）的签名
+const sealKey = (key) => (key === 'idc' ? 'cred' : key);
 const DOC_NAMES = { cred: '凭证', brw: '浏览器令牌', api: 'API 授权', voucher: '请求券', return: '临时返回页', env: '环境信息卡', ent: '企业授权',
-  pay: '支付凭证', kyc: 'KYC 证明' };
+  pay: '支付凭证', kyc: 'KYC 证明', idc: '身份信息卡' };
 // 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
 // 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、特别关注对象，以及浏览器令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符、
 // 凭证地区不在支持地区、未满 13 岁、付款账户是虚拟支付卡、流量异常且嗅探出特殊进程（traffic）。
@@ -167,9 +171,10 @@ function forgedCorp(c) {
   return [{ name: c.name, icon: { pat: pat.map((r) => r.join('')), cols: c.icon.cols } }, '企业图标与企业名录不符'];
 }
 
-// 环境信息卡（无尽模式难度 2）：登记这个账户的环境档案：时区、常用设备、平均流量。
-// 时区须与凭证地区一致；常用设备 / 平均流量对照审查窗里本次请求的使用设备 / 请求流量
-const ENV_ROWS = ['时区', '常用设备', '平均流量'];
+// 环境信息卡（无尽模式难度 2）：登记这个账户的环境档案：时区、常用设备、平均流量与有效期。
+// 时区须与凭证地区一致；常用设备 / 平均流量对照审查窗里本次请求的使用设备 / 请求流量；
+// 有效期与浏览器令牌一致，对照系统日期 / 通告日期查验。
+const ENV_ROWS = ['时区', '常用设备', '平均流量', '有效期'];
 const DEVICES = ['Windows 台式机', 'Windows 笔记本', 'MacBook', 'iMac', 'Linux 工作站', 'iPhone', 'iPad', 'Android 手机'];
 const fmtFlow = (v) => `${v} KB/s`;
 // 请求嗅探的报告：前台进程总是正常的浏览器 / 客户端；流量异常时后台多一个进程。
@@ -181,9 +186,10 @@ const NORMAL_PROCS = ['OneDrive（云盘同步）', 'Google Drive（云盘同步
 
 // —— 支付凭证与 KYC 证明（无尽模式难度 3） ——
 // 支付凭证：个人账户的非 free 套餐和 API 调用都要出示；企业账户由公司完成支付验证，不需要。
-// 登记 IP、付款账户、账单地址、手机号。
+// 登记 IP、付款账户、账单地址、手机号与有效期。
 // IP 对凭证；账单地址的城市、手机号的国家码对凭证地区；账单地址还要和 KYC 证明的住址一字不差。
 // 账单地址 / 手机号看起来不符时先验证 SMS，SMS 通过就正常放行；付款账户不得是虚拟支付卡。
+// 有效期与浏览器令牌一致，对照系统日期 / 通告日期查验。
 // KYC 证明：所有用户都要出示，仿照护照：上方是出生地、住址、出生日期（人像与真实姓名只是装饰），下方是 KYC 更新记录，
 // 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的核验签名。出生地与住址必须在同一地区（可以是不支持地区，但不使用朝鲜），
 // 对不上视为伪造证件；KYC 住址与账单地址不符时先验证 SMS；出生地不与账单地址比对。出生日期要年满 13 岁；最近一次 KYC 更新须在三年之内。
@@ -231,13 +237,13 @@ const RULES = [
   { key: 'docs', head: '每个请求需出示凭证' },
   { key: 'personal', head: '个人账户需出示浏览器令牌' },
   { key: 'region', head: '凭证地区须为支持地区' },
-  { key: 'locale', head: '语言和时区须与地区一致', hidden: true },
+  { key: 'locale', head: '语言和时区须与地区一致' },
   { key: 'isp', head: '浏览器令牌运营商须与凭证地区一致', hidden: true },
   { key: 'date', head: '所有证件须为当前有效' },
   { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
   { key: 'match', head: '证件上的 IP 须与本人一致', hidden: true },
   { key: 'api', head: 'API 调用必须出示 API 授权' },
-  { key: 'scope', head: 'API 授权的用途须与请求一致', hidden: true  },
+  { key: 'scope', head: 'API 授权的用途须与请求一致', hidden: true },
   { key: 'sig', head: '凭证、API 授权与 KYC 证明须有合法的数字签名', hidden: true },
   { key: 'wanted', head: '特别关注对象的请求须拒绝', hidden: true },
   { key: 'sms', head: '头像 / 昵称 / 企业账号不符时可验证 SMS', hidden: true },
@@ -270,12 +276,22 @@ const RULES_3 = RULES_2.flatMap((r) => {
   if (r.key === 'sms') return [{ ...r, head: '头像 / 昵称 / 设备 / 企业账号 / KYC 住址与账单地址不符时可验证 SMS' }];
   return [r];
 });
+// 无尽模式难度 4：浏览器令牌、环境信息卡和支付凭证合并成一张身份信息卡（由安全部会话中心签名）。
+// 支付信息印在卡上：个人付费套餐与 API 调用的卡上要登记付款账户（free 套餐的对话请求印「无」）
+const RULES_4 = RULES_3.map((r) => {
+  if (r.key === 'personal') return { ...r, head: '个人账户需出示身份信息卡' };
+  if (r.key === 'isp') return { ...r, head: '身份信息卡运营商须与凭证地区一致' };
+  if (r.key === 'pay') return { ...r, head: '个人付费套餐与 API 调用需登记支付信息' };
+  if (r.key === 'billing') return { ...r, head: '身份信息卡的支付信息须与凭证及 KYC 证明一致' };
+  if (r.key === 'sig') return { ...r, head: '凭证、身份信息卡、API 授权与 KYC 证明须有合法的数字签名' };
+  return r;
+});
 
 // —— 规则组：这一班生效的条例、证件和会出的问题。无尽模式用全套，故事模式每天各有一组 ——
 //   rules / continents   手册「基本条例」「支持地区」两页；seals = 手册有没有「签名详情」一页
 //   regions              合规请求的凭证地区（其余地区都算不支持）
 //   brw / kinds          要不要浏览器令牌；请求类型（'chat' / 'api'）
-//   tokRows             浏览器令牌上印哪些栏位（默认 IP、运营商、语言、时区、签发、有效期）；浏览器令牌没有数字签名
+//   tokRows             浏览器令牌上印哪些栏位（默认 IP、运营商、语言、时区、签发、有效期）；请求摘要固定印在签发上方；浏览器令牌没有数字签名
 //   credRows / sig       凭证上印哪些栏位；证件带不带数字签名
 //   flaws / legit        会出的问题（null = 全部）；本人换过头像 / 改过昵称 / 支付凭证地址手机号有出入的比例
 //   wanted               有没有特别关注对象
@@ -283,20 +299,26 @@ const RULES_3 = RULES_2.flatMap((r) => {
 //   inspect              桌面上有没有『审查』应用
 //   voucher / foreign    启用请求券时，美国以外的支持地区请求要持券；随机请求里这类外国请求的比例
 //   env                  每个请求要不要出示环境信息卡（时区印在卡上，手册「支持地区」页随之列出时区；
-//                        审查窗多出使用设备 / 请求流量两栏，对照卡上的常用设备 / 平均流量）
+//                        审查窗多出使用设备 / 请求流量两栏，对照卡上的常用设备 / 平均流量；卡上还有与浏览器令牌一致的有效期）
 //   ent                  企业账户的比例（0 = 没有企业授权；手册多一章「企业名录」）
 //   pay / kyc            支付凭证 / KYC 证明（难度 3；「支持地区」页多一栏区号）
+//   idc                  浏览器令牌、环境信息卡和支付凭证合并成一张身份信息卡（难度 4；brw / env / pay 仍为 true，表示卡上有这些栏位）
+//   denyReason           拒绝请求要加盖「拒绝理由」章（难度 3 起；询问过异常后才拉得出来，没盖就算事故）
 const FULL_RULES = {
   rules: RULES, continents: CONTINENTS, seals: true, regions: REGIONS_OK, brw: true, kinds: ['chat', 'api'],
   tokRows: ['IP', '运营商', '语言', '签发', '有效期'],
   credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: null, legit: P_LEGIT, wanted: true,
   redTeam: true, redGuards: true, inspect: true, voucher: false, foreign: 0, env: false, ent: 0, pay: false, kyc: false,
+  idc: false, denyReason: false,
 };
 // 无尽模式的难度：难度 1 就是原来的全套；难度 2 加上环境信息卡与企业授权；难度 3 再加支付凭证与 KYC 证明
 // （凭证多印一栏套餐，用来判断要不要支付凭证）
 const FULL_RULES_2 = { ...FULL_RULES, rules: RULES_2, env: true, ent: 0.2 };
-const FULL_RULES_3 = { ...FULL_RULES_2, rules: RULES_3, credRows: ['IP', '昵称', '地区', '套餐', '有效期'], pay: true, kyc: true };
-const ENDLESS_RULES = [FULL_RULES, FULL_RULES_2, FULL_RULES_3];
+const FULL_RULES_3 = { ...FULL_RULES_2, rules: RULES_3, credRows: ['IP', '昵称', '地区', '套餐', '有效期'], pay: true, kyc: true,
+  denyReason: true };
+// 难度 4：难度 3 的全部，浏览器令牌、环境信息卡和支付凭证合并成身份信息卡
+const FULL_RULES_4 = { ...FULL_RULES_3, rules: RULES_4, idc: true };
+const ENDLESS_RULES = [FULL_RULES, FULL_RULES_2, FULL_RULES_3, FULL_RULES_4];
 
 const TOK_ROWS_ALL = ['IP', '运营商', '语言', '时区', '签发', '有效期'];
 // 这一班看得到时区吗：浏览器令牌印了时区，或者有环境信息卡（手册的条例 / 支持地区页跟着列出时区）
@@ -366,7 +388,7 @@ const addYears = (d, n) => new Date(d.getFullYear() + n, d.getMonth(), d.getDate
 const dayDiff = (a, b) => Math.round((b - a) / 86400000);
 // 难度 3 的地址：「城市 · 街道 门牌号」，城市默认随机挑一个属于该地区的
 const addressIn = (region, city = pick(REGION_CITIES[region] || REGION_CITIES['美国'])) => `${city} · ${pick(STREETS)} ${rint(1, 999)} 号`;
-// 无尽模式的世界观日期按难度推进：难度 1 是 2078.01.01，难度 2 是 2078.01.02，难度 3 是 2078.01.03
+// 无尽模式的世界观日期按难度推进：难度 1 是 2078.01.01，难度 2 是 2078.01.02，难度 3 是 2078.01.03，难度 4 是 2078.01.04
 const worldDate = (diff = 1) => addDays(WORLD_DATE, diff - 1);
 
 const NAMES = ['mlee', 'k.tanaka', 'jonas.w', 'sarah_k', 'dchen', 'amelia.r', 'hiro', 'lukas88', 'nina.v', 'tomw', 'ravi.k',
@@ -433,6 +455,7 @@ const QUESTIONS = {
   no_kyc: '你没有出示 KYC 证明。', kyc_exp: '你的 KYC 已经超过三年没有更新。', minor: '你还没有满 13 岁。',
   kyc_forged: '你的 KYC 出生地和住址对不上（伪造证件）。',
   kyc_region: '你的 KYC 出生地和凭证地区不一致。',
+  no_idc: '你没有出示身份信息卡。', no_payinfo: '付费套餐和 API 调用需要在身份信息卡上登记支付信息。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -470,7 +493,34 @@ const EXCUSES = {
   minor: ['我已经成年了。', '生日填错了。', '……这是我哥哥的账号。'],
   kyc_forged: ['出生地是后来补的。', '可能是系统拼错了。', '……我记不清了。'],
   kyc_region: ['我是在国外出生的。', '后来才移民过来的。', '出生地一直没改。'],
+  no_idc: ['我不知道要这个。', '卡还在补办。', '以前不需要这个。'],
+  no_payinfo: ['我是用礼品卡充的。', '卡还没办好。', '以前不需要这个。'],
 };
+
+// —— 身份信息卡（无尽模式难度 4）——
+// 请求照常按浏览器令牌 / 环境信息卡 / 支付凭证生成，最后把三张证件的栏位并到身份信息卡上：
+// 审查栏位 brw.* / env.* / pay.* 一律改成 idc.*（同名栏位合并，例如浏览器令牌和支付凭证的 IP），说明文字里的证件名也跟着换
+const IDC_FROM = ['brw', 'env', 'pay'];
+const idcKey = (k) => { const [doc, f] = k.split('.'); return IDC_FROM.includes(doc) ? `idc.${f}` : k; };
+const idcText = (s) => s.replace(/浏览器令牌|环境信息卡|支付凭证/g, DOC_NAMES.idc);
+function mergeIdc(spec) {
+  const remap = (pk) => { const [a, b] = pk.split('|').map(idcKey); return a === b ? null : [a, b].sort().join('|'); };
+  for (const is of spec.issues) {
+    const seen = new Set();
+    is.pairs = is.pairs.map((p) => p.map(idcKey)).filter(([a, b]) => {
+      const pk = [a, b].sort().join('|');
+      if (a === b || seen.has(pk)) return false;
+      seen.add(pk);
+      return true;
+    });
+    is.title = idcText(is.title);
+    is.sub = idcText(is.sub);
+  }
+  spec.reason = idcText(spec.reason);
+  spec.checks = new Set([...spec.checks].map(remap).filter(Boolean));
+  spec.confirms = new Set([...spec.confirms].map(remap).filter(Boolean));
+  spec.notes = new Map([...spec.notes].map(([k, v]) => [remap(k), { title: idcText(v.title), sub: idcText(v.sub) }]).filter(([k]) => k));
+}
 
 // ———————————————— 生成请求 ————————————————
 
@@ -479,6 +529,8 @@ const EXCUSES = {
 function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 企业账户（难度 2）：只出示凭证和企业授权（难度 3 另加 KYC 证明），一律是对话请求
   const ent = Math.random() < (rs.ent || 0);
+  // 难度 4：浏览器令牌、环境信息卡和支付凭证合并成身份信息卡（个人账户才有）
+  const idc = !!rs.idc;
   const kind = !ent && rs.kinds.includes('api') && Math.random() < 0.35 ? 'api' : 'chat';
   let kinds = ['region', 'locale', 'isp', 'photo', 'ip', 'name', 'brw', 'brw', 'sig', 'sig', 'no_cred', 'no_voucher', 'future'];
   if (kind === 'api') kinds.push('no_api', 'no_api', 'scope', 'scope');
@@ -508,7 +560,8 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   if (!rs.voucher || !foreignRegions.length) kinds = kinds.filter((k) => k !== 'no_voucher');
   // 环境信息卡缺失：个人账户的条例要求出示环境信息卡时才出
   // 使用设备 / 请求流量对照环境信息卡，所以同样只在出示环境信息卡的规则组里出
-  if (rs.env && ruleKeys.has('personal')) kinds.push('no_env', 'device', 'traffic');
+  // 难度 4 的环境信息卡并进了身份信息卡：缺卡改成「身份信息卡缺失」
+  if (rs.env && ruleKeys.has('personal')) kinds.push(idc ? 'no_idc' : 'no_env', 'device', 'traffic');
   // 企业账户只出示凭证、企业授权和 KYC 证明：支付凭证由公司完成验证，不生成；
   // 只出凭证本身（头像 / IP / 过期 / 签名）和企业授权上的问题。
   // 昵称不符留给普通请求；企业授权的账号不符另算 ent_acct，同样可以验证 SMS（旧账号会留在档案的曾用名里）
@@ -569,6 +622,9 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const brw = rs.brw && !ent
     ? { IP: ip, 运营商: ispOf(region), 语言: lang, 时区: tz, 签发: day(-3, 0), 有效期: day(0, 6) }
     : null;
+  // 环境信息卡与支付凭证的有效期跟浏览器令牌一致：难度 4 三张证件并成一张身份信息卡时只印一个有效期
+  let validUntil = brw ? brw.有效期 : null;
+  const validDate = () => (validUntil || (validUntil = day(0, 6)));   // 没有浏览器令牌的规则组才另取日期，两张卡共用
   const api = kind === 'api' ? {
     IP: ip, 用途: flaw === 'scope' ? pick(SCOPES.filter((s) => s !== scope)) : scope,
     有效期: day(5, 300), sig: genuine('api'),
@@ -579,7 +635,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const device = rs.env ? pick(DEVICES) : null;
   const avgFlow = rint(8, 60);
   const flow = rs.env ? Math.max(1, Math.round(avgFlow * (0.7 + Math.random() * 0.7))) : null;
-  const env = rs.env && !ent ? { 时区: tz, 常用设备: device, 平均流量: fmtFlow(avgFlow) } : null;
+  const env = rs.env && !ent ? { 时区: tz, 常用设备: device, 平均流量: fmtFlow(avgFlow), 有效期: validDate() } : null;
   // 企业授权：授权企业是另外 0–2 家企业，再插进 Anthrotzka（授权无效时没有它）；签发企业自己不列。
   // DeepThink 的授权一律无效，所以不论这一单还有什么问题，授权企业一栏都不含 Anthrotzka。
   const lackHost = !!corp && (corp.key === 'deepthink' || flaw === 'ent_auth');
@@ -615,8 +671,12 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       sig: rs.sig ? genuine('kyc') : null,          // 第三方「人格有限公司」的核验签名
     };
   }
-  if (needPay) payDoc = { IP: ip, 付款账户: `${pick(BANK_ISSUERS)} ·${digits(4)}`, 账单地址: home, 手机号: phoneNum(region) };
-  const docs = { cred, brw, api, voucher, env, ent: entDoc, pay: payDoc, kyc: kycDoc };
+  if (needPay) payDoc = { IP: ip, 付款账户: `${pick(BANK_ISSUERS)} ·${digits(4)}`, 账单地址: home, 手机号: phoneNum(region), 有效期: validDate() };
+  // 难度 4 的身份信息卡：栏位取自 brw / env / pay，这里放安全部会话中心的签名和手机号。
+  // 手机号与难度 3 不同：不需要支付信息的请求（free 套餐的对话）卡上也一定有号码，
+  // 这个号码同时就是验证 SMS 时身份记录上的号码（见下面的 spec.sms）。
+  const idcDoc = idc && brw ? { sig: rs.sig ? genuine('cred') : null, 手机号: payDoc ? payDoc.手机号 : phoneNum(region) } : null;
+  const docs = { cred, brw, api, voucher, env, ent: entDoc, pay: payDoc, kyc: kycDoc, idc: idcDoc };
   const spec = {
     avatar, handle, ip, kind, typeLabel: ent ? '企业请求' : kind === 'api' ? 'API 调用' : '对话',
     device, flow: flow && fmtFlow(flow),
@@ -647,6 +707,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     docs.env = null;
     issue([['rv.柜台', 'rule.personal']], '环境信息卡缺失', '柜台上没有环境信息卡   本人未出示环境信息卡');
     spec.reason = '未出示环境信息卡';
+  } else if (flaw === 'no_idc') {
+    // 难度 4：浏览器令牌、环境信息卡和支付凭证都在这张卡上，缺卡就全都没有
+    docs.brw = docs.env = docs.pay = docs.idc = null;
+    issue([['rv.柜台', 'rule.personal']], '身份信息卡缺失', '柜台上没有身份信息卡   本人未出示身份信息卡');
+    spec.reason = '未出示身份信息卡';
   } else if (flaw === 'ent_auth') {
     // 授权企业一栏没有 Anthrotzka：拿它和「企业账户须出示…」的条例比对，授权书视为无效证件。
     // 企业账户不受地区限制，但 DeepThink 的凭证地区（中国大陆）本来就不在支持地区：
@@ -701,7 +766,8 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     else pairs.forEach(([a, b]) => note(a, b, '无特殊进程', `后台进程 ${bg}，未运行爬虫或自动化脚本`));
     spec.reason = `请求流量异常，后台开着特殊进程 ${bg}（${what}）`;
   } else if (flaw === 'ip') {
-    const k = withDocs(['cred', 'brw', 'api', 'ent', 'pay']);
+    // 难度 4 的身份信息卡只印一个 IP（取自浏览器令牌），支付凭证的 IP 不单独改
+    const k = withDocs(idc ? ['cred', 'brw', 'api', 'ent'] : ['cred', 'brw', 'api', 'ent', 'pay']);
     docs[k].IP = ipVariant(ip);
     const others = ['rv.IP'];
     for (const x of ['cred', 'brw', 'api', 'ent', 'pay']) if (x !== k && docs[x]) others.push(`${x}.IP`);
@@ -716,6 +782,9 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   } else if (flaw === 'brw') {
     const keys = ['cred', 'brw', 'brw', 'api'];
     if (docs.voucher) keys.push('voucher', 'voucher', 'voucher');
+    // 环境信息卡与支付凭证也登记有效期，同样可能过期；难度 4 三张证件并成一张卡，只按卡上的有效期出题
+    if (docs.env && !idc) keys.push('env');
+    if (docs.pay && !idc) keys.push('pay');
     const k = withDocs(keys);
     docs[k].有效期 = day(-40, -1);
     if (k === 'brw') brw.签发 = fmtDate(addDays(today, -rint(41, 60)));
@@ -756,7 +825,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const title = which === 'both' ? '语言和时区与地区不符' : which === 'lang' ? '语言与地区不符' : '时区与地区不符';
     issue(pairs, title, sub);
     spec.reason = which === 'both'
-      ? `${tzDoc === 'brw' ? '浏览器令牌的语言 / 时区' : '浏览器令牌语言与环境信息卡时区'}与凭证地区（${cred.地区}）不符`
+      ? `${tzDoc === 'brw' || idc ? '浏览器令牌的语言 / 时区' : '浏览器令牌语言与环境信息卡时区'}与凭证地区（${cred.地区}）不符`
       : which === 'lang' ? `浏览器令牌语言（${brw.语言}）与凭证地区（${cred.地区}）不符`
         : `${tzName}时区（${docs[tzDoc].时区}）与凭证地区（${cred.地区}）不符`;
   } else if (flaw === 'isp') {
@@ -769,12 +838,13 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       `凭证地区：${cred.地区}   浏览器令牌运营商：${brw.运营商}`, 'isp');
     spec.reason = `浏览器令牌运营商（${brw.运营商}）与凭证地区（${cred.地区}）不符`;
   } else if (flaw === 'sig') {
-    // 只有凭证、API 授权和 KYC 证明带签名：浏览器令牌没有签名，伪造签名不会落在浏览器令牌上
-    const k = withDocs(['cred', 'api', 'kyc']);
-    const [s, sub] = forged(k);
+    // 只有凭证、API 授权、KYC 证明和身份信息卡（难度 4）带签名：浏览器令牌没有签名，伪造签名不会落在浏览器令牌上
+    const k = withDocs(['cred', 'api', 'kyc', 'idc']);
+    const [s, sub] = forged(sealKey(k));
     docs[k].sig = s;
-    // 凭证的签发机构和签名也印在通告第 1 页底部（只是印着，审查签名要对规则手册的「签名详情」页）
-    issue([[`${k}.签名`, `book.${k}`]], '签名不合法', sub);
+    // 凭证的签发机构和签名也印在通告第 1 页底部（只是印着，审查签名要对规则手册的「签名详情」页）；
+    // 身份信息卡和凭证共用安全部会话中心的签名，对照手册上同一枚式样
+    issue([[`${k}.签名`, `book.${sealKey(k)}`]], '签名不合法', sub);
     spec.reason = `${DOC_NAMES[k]}的数字签名不合法（${sub}）`;
   } else if (flaw === 'no_api') {
     docs.api = null;
@@ -810,6 +880,13 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     issue(pairs, 'KYC 出生地与住址不符（伪造证件）',
       `出生地：${docs.kyc.出生地}   住址：${docs.kyc.住址}   凭证地区：${cred.地区}`, 'kyc_forged');
     spec.reason = `KYC 出生地（${docs.kyc.出生地}）与住址（${docs.kyc.住址}）不符（伪造证件）`;
+  } else if (flaw === 'no_pay' && idc) {
+    // 难度 4：身份信息卡照常出示，只是支付信息一栏印着「无」：拿卡上的付款账户对套餐 / 请求类型和条例
+    docs.pay = null;
+    const why = kind === 'api' ? 'API 调用' : `${plan} 套餐`;
+    issue([['idc.付款账户', 'rule.pay'], kind === 'api' ? ['idc.付款账户', 'rv.类型'] : ['idc.付款账户', 'cred.套餐']], '支付信息缺失',
+      `${why}   身份信息卡未登记付款账户`, 'no_payinfo');
+    spec.reason = `${why}的身份信息卡未登记支付信息`;
   } else if (flaw === 'no_pay') {
     docs.pay = null;
     const why = kind === 'api' ? 'API 调用' : `${plan} 套餐`;
@@ -870,8 +947,8 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
 
   // 验证 SMS：身份记录（按凭证查到的账户）上的手机号和曾用名。冒用者报的号码差一位，证件昵称 / 企业账号也不在曾用名里
   if (idf) {
-    // 难度 3：档案上的手机号就是支付凭证上登记的那个
-    const phone = docs.pay ? docs.pay.手机号 : phoneNum(region);
+    // 身份记录上的手机号：难度 3 是支付凭证上登记的那个；难度 4 的卡上一定印着手机号（不需要支付信息时也印）
+    const phone = docs.pay ? docs.pay.手机号 : docs.idc ? docs.idc.手机号 : phoneNum(region);
     const docName = spec.nameField ? docs[spec.nameField.split('.')[0]][spec.nameField.split('.')[1]] : null;
     const others = NAMES.filter((n) => n !== handle && n !== docName);
     // 曾用名：只有涉及昵称 / 企业账号不一致时才会出现；改过昵称 / 换过企业账号的合规请求一定留着旧昵称。其余一律印「无」
@@ -909,7 +986,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 注明不需要浏览器令牌和环境信息卡
   if (ruleKeys.has('docs')) pair('rv.柜台', 'rule.docs');
   if (ruleKeys.has('personal')) {
-    if (corp) note('rv.柜台', 'rule.personal', '企业账户', '已出示凭证和企业授权   无需浏览器令牌和环境信息卡');
+    if (corp) note('rv.柜台', 'rule.personal', '企业账户', `已出示凭证和企业授权   无需${idc ? '身份信息卡' : '浏览器令牌和环境信息卡'}`);
     else pair('rv.柜台', 'rule.personal');
   }
   if (docs.cred) {
@@ -952,9 +1029,17 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 需要时柜台 / 套餐 / 类型都对条例
   if (ruleKeys.has('pay')) {
     if (needPay) {
-      pair('rv.柜台', 'rule.pay');
+      // 难度 4 没有单独的支付凭证：柜台上有没有卡说明不了支付信息，改看卡上的付款账户
+      if (!idc) pair('rv.柜台', 'rule.pay');
       if (plan !== 'free') pair('cred.套餐', 'rule.pay');
       if (kind === 'api') pair('rv.类型', 'rule.pay');
+      if (idc && docs.pay) {
+        pair('idc.付款账户', 'rule.pay');
+        pair('idc.付款账户', kind === 'api' ? 'rv.类型' : 'cred.套餐');
+      }
+    } else if (idc && docs.idc) {
+      // free 套餐的对话请求：卡上的支付信息印「无」
+      for (const b of ['rule.pay', 'cred.套餐']) note('idc.付款账户', b, '免费套餐', 'free 套餐的对话请求   无需登记支付信息');
     }
   }
   if (docs.pay) {
@@ -998,8 +1083,17 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     pair(`${k}.IP`, 'rv.IP');
     if (k !== 'cred' && docs.cred) pair(`${k}.IP`, 'cred.IP');
   }
+  // 环境信息卡与支付凭证的有效期同样可以拿来和系统日期 / 通告日期 / 条例「所有证件须为当前有效」核对
+  for (const k of ['env', 'pay']) {
+    if (!docs[k]) continue;
+    pair(`${k}.有效期`, 'sys.日期');
+    pair(`${k}.有效期`, 'notice.date');
+    pair(`${k}.有效期`, 'rule.date');
+  }
   // KYC 证明的签名由第三方「人格有限公司」核验签发，对照手册「签名详情」页
   if (docs.kyc && docs.kyc.sig && rs.seals) pair('kyc.签名', 'book.kyc');
+  // 身份信息卡的签名由安全部会话中心签发，和凭证对照同一枚式样
+  if (docs.idc && docs.idc.sig && rs.seals) pair('idc.签名', 'book.cred');
   if (docs.voucher) {
     pair('voucher.有效期', 'sys.日期');
     pair('voucher.有效期', 'notice.date');
@@ -1024,13 +1118,43 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 请求摘要印在浏览器令牌上：浏览器令牌真的交出来（docs.brw 没有被 no_tok 清掉）才看得到，本人也才会说明来意。
   // 企业请求没有浏览器令牌，也就不显示请求概述。
   spec.taskOnTok = !!docs.brw && !spec.ent;
+  if (idc) mergeIdc(spec);
 
   // 凭证缺失时柜台上没有凭证：临时返回页由 station.js 在询问「凭证缺失」之后才派发到桌面
   spec.docs = [];
   if (docs.cred) spec.docs.push(new Doc('cred', rs.credRows.map((k) => [k, cred[k]]), cred.sig, cred.photo));
   if (docs.voucher) spec.docs.push(new Doc('voucher', [['有效期', docs.voucher.有效期]], null));
   // 浏览器令牌上多印一栏请求摘要（第三项 true = 太长就折行），没有浏览器令牌时审查窗也看不到摘要
-  if (docs.brw) spec.docs.push(new Doc('brw', tokRows.map((k) => [k, docs.brw[k]]).concat([['请求', task, true]]), null));
+  // 难度 4：浏览器令牌、环境信息卡和支付凭证的栏位印在同一张身份信息卡上（支付信息不需要时印「无」）
+  // 卡面按四类排版：连线 / 请求 → 环境 → 支付 → 效期，类别之间用虚线隔开（docs.js 的 DOC_SEP）。
+  // 手机号始终有内容：不需要支付信息时，印身份记录上的那个号码（idcDoc.手机号）
+  if (idc && docs.idc && docs.brw) {
+    const pay = docs.pay || {};
+    const cardRow = (k, v, multi) => (v === undefined || v === null || v === '' ? null : [k, v, multi]);
+    const rows = [
+      cardRow('IP', docs.brw.IP), cardRow('运营商', docs.brw.运营商), cardRow('请求', task, true),
+      DOC_SEP,
+      cardRow('语言', docs.brw.语言), cardRow('时区', docs.env.时区),
+      cardRow('常用设备', docs.env.常用设备), cardRow('平均流量', docs.env.平均流量),
+      DOC_SEP,
+      cardRow('手机号', pay.手机号 || docs.idc.手机号),
+      cardRow('账单地址', pay.账单地址 || '无', true), cardRow('付款账户', pay.付款账户 || '无', true),
+      DOC_SEP,
+      cardRow('签发', docs.brw.签发), cardRow('有效期', docs.brw.有效期),
+    ].filter(Boolean);
+    spec.docs.push(new Doc('idc', rows, docs.idc.sig));
+    docs.brw = docs.env = docs.pay = null;
+  }
+  if (docs.brw) {
+    // 请求摘要印在「签发」上方；没有签发栏的规则组照旧放在最后
+    const rows = [];
+    for (const k of tokRows) {
+      if (k === '签发') rows.push(['请求', task, true]);
+      rows.push([k, docs.brw[k]]);
+    }
+    if (!tokRows.includes('签发')) rows.push(['请求', task, true]);
+    spec.docs.push(new Doc('brw', rows, null));
+  }
   if (docs.env) spec.docs.push(new Doc('env', ENV_ROWS.map((k) => [k, docs.env[k]]), null));
   if (docs.api) spec.docs.push(new Doc('api', ['IP', '用途', '有效期'].map((k) => [k, docs.api[k]]), docs.api.sig));
   // 企业授权：顶部横幅印签发企业的图标和名称（审查栏位 ent.企业），授权企业太长就折行
@@ -1044,7 +1168,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   if (docs.kyc) spec.docs.push(new KycDoc(docs.kyc));
   if (docs.pay) {
     spec.docs.push(new Doc('pay', [['IP', docs.pay.IP], ['付款账户', docs.pay.付款账户, true], ['账单地址', docs.pay.账单地址, true],
-      ['手机号', docs.pay.手机号]], null));
+      ['手机号', docs.pay.手机号], ['有效期', docs.pay.有效期]], null));
   }
   return spec;
 }

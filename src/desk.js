@@ -84,6 +84,24 @@ function updateTray() {
   T.u = clamp(T.u + (T.open ? dt : -dt) / 0.15);
 }
 
+// 拒绝理由章的抽屉（难度 3 起）：询问过异常后才出现；指针碰到左上角的把手就拉下来，离开面板就收回
+const reasonPanel = (u = D.reasonTray.u) => {
+  const dy = -Math.round((1 - easeOut(u)) * REASON_SLIDE);
+  return [REASON_BOX[0], REASON_BOX[1] + dy, REASON_BOX[2], REASON_TAB[3] + dy];
+};
+function updateReasonTray() {
+  if (D.paused) return;
+  const T = D.reasonTray, dt = Math.min(0.1, now - T.last);
+  T.last = now;
+  const ok = reasonReady(D.ent) && !D.insp.on && D.intro === null && !D.ended;
+  T.open = ok && (inBox(ptr.x, ptr.y, REASON_HOT) || (T.open && inBox(ptr.x, ptr.y, reasonPanel())));
+  T.u = ok ? clamp(T.u + (T.open ? dt : -dt) / 0.15) : 0;
+}
+
+function reasonZoneAt(x, y) {
+  return D.reasonTray.u >= 0.9 && inBox(x, y, REASON_ZONE);
+}
+
 // 柜台上的证件多了：指针停在柜台左 / 右边缘时整排自动滚动
 function updateCounter(dt) {
   const max = iconMaxScroll();
@@ -109,11 +127,15 @@ function stampZoneAt(x, y) {
 
 const draggedWin = () => drag && drag.moved && drag.inst.win;
 
-// 证件的两个放置目标：右侧决定栏（只认能盖章的证件，随时可以重新盖成另一栏）、
-// 审查窗的头像（做出决定后归还证件）
+// 证件的放置目标：右侧决定栏（只认能盖章的证件，随时可以重新盖成另一栏）、
+// 左上角的拒绝理由章（难度 3 起，询问过异常后）、审查窗的头像（做出决定后归还证件）
 function dropDoc(win, x, y, remove) {
   const e = D.ent;
   if (!e || e.leaving || !e.spec.docs.includes(win)) return false;
+  if (reasonZoneAt(x, y)) {
+    if (isStampDoc(win)) stampReason();
+    return true;
+  }
   const zone = stampZoneAt(x, y);
   if (zone) {
     if (isStampDoc(win)) decide(zone);
@@ -148,7 +170,7 @@ function deskDown(x, y) {
     }
   }
   const b = D.insp.banner;
-  if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, ASK_BTN)) return askAbout(b.issue);
+  if (b && b.ok && D.ent && !D.ent.leaving && inBox(x, y, askBtn())) return askAbout(b.issue);
   if (rules().inspect && inBox(x, y, INSPECT_ICON) && !(D.insp.on && fieldAt(x, y))) return openApp('insp');
   // 柜台第一个按钮：先询问异常才有措施；按下后锁定，直到审查出新的异常并重新询问
   const e = D.ent;
@@ -170,6 +192,7 @@ function deskDown(x, y) {
     return;
   }
   if (D.tray.u > 0.5 && inBox(x, y, TRAY_BOX)) return;
+  if (D.reasonTray.u > 0.5 && inBox(x, y, reasonPanel())) return;
   for (const t of taskButtons()) if (inBox(x, y, t.box)) return taskClick(t.w);
   if (inBox(x, y, NEXT_BTN)) return callNext();
   for (const ic of [...D.icons].reverse()) {
@@ -228,7 +251,12 @@ function deskUp(x, y) {
   delete w.out;
   if (w.kind === 'smsf' && inBox(x, y, AVATAR_BOX)) { [w.x, w.y] = d.prev; return smsSend(w); }
   // 拖去盖章 / 归还：盖完章的窗口回到原位
-  if (dropDoc(w.win, x, y, () => { D.wins = D.wins.filter((o) => o !== w); })) { [w.x, w.y] = d.prev; return; }
+  if (dropDoc(w.win, x, y, () => { D.wins = D.wins.filter((o) => o !== w); })) {
+    [w.x, w.y] = d.prev;
+    // 盖了拒绝理由章的证件往下长了一条：别让它超出桌面底部
+    if (w.win.reason) w.y = Math.max(DESK_AREA[1] + 2, Math.min(w.y, DESK_AREA[3] - w.win.h - 2));
+    return;
+  }
   if (!out) { if (w.kind === 'book') RUN.bookPos = [w.x, w.y]; return; }
   [w.x, w.y] = d.prev;
   if (w.kind === 'doc') stow(w);
@@ -292,7 +320,7 @@ function shiftTimes(dt) {
   if (!(dt > 0)) return;
   const s = (x) => (typeof x === 'number' ? x + dt : x);
   D.tStart = s(D.tStart); D.nextArrive = s(D.nextArrive); D.gateT = s(D.gateT);
-  D.tray.last = s(D.tray.last); D.iconT = s(D.iconT);
+  D.tray.last = s(D.tray.last); D.reasonTray.last = s(D.reasonTray.last); D.iconT = s(D.iconT);
   if (D.intro !== null) D.intro = s(D.intro);
   if (D.insp.banner) D.insp.banner.t = s(D.insp.banner.t);
   if (D.arrest) D.arrest.t0 = s(D.arrest.t0);

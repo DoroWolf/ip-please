@@ -80,7 +80,8 @@ function askAbout(issue) {
   e.asked.add(issue);
   e.measureReady = true;   // 询问异常后解锁措施按钮
   issueReturnTicket(e);    // 没有凭证时，询问「凭证缺失」之后才派发临时返回页
-  say('C', QUESTIONS[issue.type]);
+  // 难度 4：问话里的浏览器令牌 / 环境信息卡 / 支付凭证都改称身份信息卡
+  say('C', rules().idc ? idcText(QUESTIONS[issue.type]) : QUESTIONS[issue.type]);
   later(0.9, () => { if (D.ent === e) say('E', issue.ask); });
   setInspect(false);       // 问完自动退出审查模式，回到桌面继续处理（审查结果留在上方横幅）
 }
