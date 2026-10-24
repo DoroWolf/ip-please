@@ -1,5 +1,9 @@
 # 开发说明
 
+## 核心原则
+
+在修改机制时，**不允许改任何现有游戏说明**，除非用户要求。
+
 ## 运行
 
 游戏没有构建步骤，也没有依赖：直接双击 `index.html`，或者
@@ -51,7 +55,7 @@ python -m http.server
 1. `newRun(mode)` 建 `RUN`；进入检查站时 `startShift()` 建 `D`，并按规则组生成规则手册和官方通告。
 2. 点『下一位』→ `callNext()` → `makeRequest(today(), mode().pBad, D.wanted, rules())` 生成一个请求 `spec`。
 3. `rules()` 在故事模式返回当天的 `STORY` 规则组，无尽模式按 `RUN.diff` 返回 `ENDLESS_RULES` 里的一组（难度 1 = `FULL_RULES`，难度 2 = `FULL_RULES_2`）。难度的名称、简介和通告附页在 `station.js` 的 `DIFFS`；最佳纪录按难度分开存（难度 1 沿用原来的键）。标题页的难度按钮按四档预留（`screens.js` 的 `DIFF_SLOTS`），之后往 `DIFFS` 加档位就会自动均分同一排的宽度。无尽模式的世界观日期也跟着难度走：难度 1 是 2078.01.01，难度 2 是 2078.01.02（`data.js` 的 `worldDate`）。
-4. 玩家盖章 → `decide(kind)`；交还全部证件 → `finishRequest()` → `judge(e, kind)` 按 `spec.flaw` 判定对错。
+4. 玩家盖章 → `decide(kind)`；交还全部证件 → `finishRequest()` → `judge(e, kind)` 按 `spec.flaw` 判定对错。只要审查出问题（`spec.legit`：头像 / 昵称 / 设备 / 流量 / 企业账号），直接拒绝也算正确处理（`denyLegit`）；证件过期不能拘留（不在 `SUSPEND_FLAWS` 里）。
 5. 审查模式用 `fieldBoxes()` 收集可点栏位（证件栏位、手册条例、任务栏日期、审查窗字段、通告、SMS 档案、嗅探报告），`compareOutcome()` 用 `spec.issues` / `spec.notes` / `spec.checks` 区分 矛盾 / 无矛盾 / 无关联。
 
 `makeRequest` 的 `spec` 字段、规则组字段、审查栏位 key 的完整说明写在 `src/data.js` 文件头；改出题逻辑前先读那段注释。

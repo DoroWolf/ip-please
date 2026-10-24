@@ -1,17 +1,17 @@
 'use strict';
-// 检查站绘制：HUD、请求排队管线、审查窗、桌面窗口、任务栏、右侧决定栏、审查压暗、横幅与提示。
+// 检查站绘制：顶部数据、请求排队管线、审查窗、桌面窗口、任务栏、右侧决定栏、审查压暗、横幅。
 // 只读 station.js / desk.js 的状态，不改判定逻辑；开场动画在 intro.js。
 
 // ———————————————————— 绘制 ————————————————————
 
 function drawDesk() {
   rect(0, 0, W - 1, H - 1, K.INK);
-  drawHud();
   drawPipe();
+  drawStats();
   drawReview();
   drawScreen();
   if (D.insp.on) drawInspect();
-  if (!drawBanner()) drawToast();
+  drawBanner();
   if (drag && drag.type === 'icon' && drag.moved) docIcon(drag.inst.dx - 8, drag.inst.dy - 6, true);
   if (drag && drag.type === 'win' && drag.inst.out && (drag.inst.kind === 'doc' || drag.inst.kind === 'smsf')) docIcon(ptr.x - 8, ptr.y - 6, true);
   if (D.intro !== null) drawIntro();
@@ -29,21 +29,60 @@ function drawPause() {
   button(PAUSE.menu, '主菜单', K.DIM, { size: 12 });
 }
 
-function drawHud() {
-  rect(...HUD, K.PANEL);
-  rect(0, 13, W - 1, 13, K.LINE);
-  txt(6, 3, 'IP, PLEASE', 8, K.CLAUDE_L);
-  txt(62, 3, RUN.mode === 'story' ? `· ${mode().name}` : `无尽 - ${mode().name}`, 8, K.CYAN);
+
+// 顶部数据：不画整条 header，只有无尽模式用一个居中的小框显示本局数据（框宽跟着文字走，不占满左右）。
+// 提示位：限时模式在时间右侧（+5s / -30s），三种模式的分数右侧都有（+1 / +2 / -5 / +10）；
+// 完美 / 耐力不扣时间，时间右侧不留空位。提示出现或消失时面板宽度不会跳动。
+const TIP_SIZE = 10, TIP_GAP = 6;   // 提示字号 / 数字与提示之间的间距
+const TIP_W = { time: tw('-30s', TIP_SIZE), score: tw('+10', TIP_SIZE) };   // 提示位宽度按最长的提示算
+
+// 提示在 TIP_DUR 秒内闪烁，之后消失；hold 的（完美模式每单加分）闪完仍然留着
+function tipShown(tip) {
+  if (!tip) return null;
+  const age = now - tip.t0;
+  if (age >= tip.dur) return tip.hold ? tip : null;
+  return Math.floor(age / 0.5) % 2 === 0 ? tip : null;
+}
+
+function drawStats() {
+  if (RUN.mode === 'story') return;
   const parts = [];
-  if (RUN.mode === 'timed') parts.push([`剩余 ${mmss(timeLeft())}`, timeLeft() < 60 ? K.RED : K.WHITE], [`已审核 ${RUN.processed}`, K.GREEN]);
-  if (RUN.mode === 'perfect') parts.push([`用时 ${mmss(elapsed())}`, K.WHITE], [`得分 ${RUN.score}`, K.GREEN]);
-  if (RUN.mode === 'story') parts.push([`DAY ${RUN.day}`, K.WHITE]);
-  if (RUN.mode === 'endure') {
-    parts.push([`用时 ${mmss(elapsed())}`, K.WHITE],
-      [`Token ${RUN.score}`, RUN.score < 0 ? K.RED : K.GREEN]);
+  if (RUN.mode === 'timed') {
+    parts.push(
+      { text: `${mmss(timeLeft())}`, col: timeLeft() < 60 ? K.RED : K.WHITE, tipW: TIP_W.time, tip: tipShown(D.tips.time) },
+      { text: `${RUN.score}`, col: K.GREEN, tipW: TIP_W.score, tip: tipShown(D.tips.score) });
   }
-  let x = W - 96;   // 右上角留给页面上的“声音 / 全屏”按钮
-  for (const [s, col] of parts.reverse()) { txt(x, 3, s, 8, col, 'ra'); x -= tw(s, 8) + 14; }
+  if (RUN.mode === 'perfect') {
+    parts.push(
+      { text: `${mmss(elapsed())}`, col: K.WHITE, tipW: 0, tip: null },
+      { text: `${RUN.score}`, col: K.GREEN, tipW: TIP_W.score, tip: tipShown(D.tips.score) });
+  }
+  if (RUN.mode === 'endure') {
+    parts.push(
+      { text: `${mmss(elapsed())}`, col: K.WHITE, tipW: 0, tip: null },
+      { text: `${RUN.score}`, col: RUN.score < 0 ? K.RED : K.GREEN, tipW: TIP_W.score, tip: tipShown(D.tips.score) });
+  }
+  if (!parts.length) return;
+  const gap = 14, pad = 10;   // 两段之间的间距 / 框内左右留白
+  const w = parts.reduce((a, p) => a + tw(p.text, TIP_SIZE) + (p.tipW ? TIP_GAP + p.tipW : 0), 0)
+    + gap * (parts.length - 1) + pad * 2;
+  const x0 = Math.round((W - w) / 2), y0 = 3, x1 = x0 + w, y1 = 20;
+  frame(x0, y0, x1, y1, K.CYAN_D, K.PANEL);
+  let x = x0 + pad;
+  parts.forEach((p, i) => {
+    if (i) {   // 竖分隔线，位置在两段中间
+      const sx = x + gap / 2;
+      rect(sx, y0 + 5, sx, y1 - 5, K.LINE_L);
+      x += gap;
+    }
+    txt(x, y0 + 4, p.text, TIP_SIZE, p.col);
+    x += tw(p.text, TIP_SIZE);
+    if (p.tipW) {
+      x += TIP_GAP;
+      if (p.tip) txt(x, y0 + 4, p.tip.text, TIP_SIZE, p.tip.col);
+      x += p.tipW;
+    }
+  });
 }
 
 // —— 上方：请求在风控检查站前排队 ——
@@ -384,12 +423,4 @@ function drawBanner() {
     button(ASK_BTN, asked ? '已询问' : '询问', K.AMBER, { size: 8, off: asked });
   }
   return true;
-}
-
-function drawToast() {
-  const t = D.toast;
-  if (!t || now - t.t > 2.6) return;
-  const w = tw(t.text, 10) + 20, cx = (SCREEN[0] + SCREEN[2]) >> 1;
-  frame(cx - w / 2, 124, cx + w / 2, 140, t.col, K.INK);
-  txt(cx, 128, t.text, 10, t.col, 'ma');
 }

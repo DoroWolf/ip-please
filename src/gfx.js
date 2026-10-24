@@ -122,8 +122,13 @@ let FONT_IMG = null, ATLAS_IMG = null;
 const FM = window.ASSETS.font;
 const PL = 2, PT = 4;
 const textCache = new Map();
+// 图集只有 8 / 10 / 12px 三档：界面上的小字不得低于 12px，低于 12 的一律按 12px 画。
+// 量测（tw）和绘制（textCanvas / txt / bigText / button）都走这里，版面计算才不会和画出来的字对不上。
+const MIN_FONT = 10;
+const fsz = (size) => Math.max(MIN_FONT, size);
 
 function tw(s, size = 12) {
+  size = fsz(size);
   let w = 0;
   for (const ch of s) {
     const g = FM[size][ch];
@@ -133,6 +138,7 @@ function tw(s, size = 12) {
 }
 
 function textCanvas(s, size, col) {
+  size = fsz(size);
   const key = size + '|' + col + '|' + s;
   let c = textCache.get(key);
   if (c) return c;
@@ -157,6 +163,7 @@ function textCanvas(s, size, col) {
 function txt(x, y, s, size = 12, col = K.TEXT, anchor = 'la', n = null) {
   s = String(s);
   if (!s) return;
+  size = fsz(size);
   const c = textCanvas(s, size, col);
   const w = tw(s, size);
   if (anchor === 'ma') x = Math.round(x - w / 2);
@@ -172,6 +179,7 @@ function txt(x, y, s, size = 12, col = K.TEXT, anchor = 'la', n = null) {
 
 // 放大 k 倍的像素字（整块像素）
 function bigText(x, y, s, size, k, col, shadow = null, align = 'center') {
+  size = fsz(size);
   const w = tw(s, size) * k;
   if (align === 'center') x = Math.round(x - w / 2);
   else if (align === 'right') x -= w;
@@ -235,6 +243,7 @@ const center = (b) => [Math.floor((b[0] + b[2]) / 2), Math.floor((b[1] + b[3]) /
 
 // 按钮：hover 时提亮；off = 不可用
 function button(box, label, col, { off = false, size = 10, hot = false } = {}) {
+  size = fsz(size);
   const hover = !off && ptr.mouse && inBox(ptr.x, ptr.y, box);
   const c = off ? K.DIM_D : col;
   frame(...box, c, hover || hot ? rgba(off ? C.DIM_D : parseRgb(col), 0.28) : K.PANEL);

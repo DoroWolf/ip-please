@@ -24,7 +24,6 @@ const introDate = () => { const d = today(); return `${d.getFullYear()}年${d.ge
 
 function endIntro() {
   D.intro = null;
-  if (D.toast) D.toast.t = now;   // 开场时弹的提示（故事模式）重新计时，别被黑屏吃掉
 }
 
 function introSounds() {

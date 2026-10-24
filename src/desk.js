@@ -3,7 +3,7 @@
 // 依赖 station.js 的 D / RUN / 常量与 docs.js 的窗口类；绘制在 render-station.js。
 
 // ———————————————————— 桌面窗口 ————————————————————
-// 窗口 kind：doc 证件 / cite 处分通知 / 应用 book 手册、notice 通告、hist 历史记录。
+// 窗口 kind：doc 证件 / cite 处罚通知 / 应用 book 手册、notice 通告、hist 历史记录。
 // 证件和通知只能最小化；应用还能关掉（任务栏上的按钮跟着消失）。seq 决定任务栏上的顺序
 
 const iconBox = (ic) => [ic.x, ic.y, ic.x + 25, ic.y + 19];
@@ -107,14 +107,11 @@ function dropDoc(win, x, y, remove) {
   if (!e || e.leaving || !e.spec.docs.includes(win)) return false;
   const zone = stampZoneAt(x, y);
   if (zone) {
-    if (!isStampDoc(win)) {
-      // 手上没有能盖章的证件：统一提示把凭证 / 临时返回页拖过来（凭证缺失要先询问，系统才会派发返回页）
-      toast(`把${stampName(e)}拖到这里来做决定`, K.AMBER);
-    } else decide(zone);
+    if (isStampDoc(win)) decide(zone);
     return true;
   }
   if (!inBox(x, y, AVATAR_BOX)) return false;
-  if (!e.decided) { toast(`先把${stampName(e)}拖到右侧的 放行 / 拒绝 栏`, K.AMBER); return true; }
+  if (!e.decided) return true;
   remove();
   layoutIcons();
   SFX.play('select', 0.6);
@@ -152,12 +149,7 @@ function deskDown(x, y) {
       if (canSniffNow(e)) return sniffOpen();
       if (canSuspendNow(e)) return suspend();
     }
-    if (measureAvailable(e)) {
-      const b = D.insp.banner;
-      const newIssue = b && b.ok && !e.asked.has(b.issue);
-      toast(e.measureUsed && !newIssue ? '措施已按下：再审查出新的异常，才能重新询问' : '先询问异常，再采取措施', K.AMBER);
-      return;
-    }
+    if (measureAvailable(e)) return;
   }
   if (D.insp.on) {
     // 审查模式下也能翻手册 / 通告（页签 / 书签 / 目录），方便对照签名式样和特别关注对象
@@ -291,7 +283,6 @@ function shiftTimes(dt) {
   D.tStart = s(D.tStart); D.nextArrive = s(D.nextArrive); D.gateT = s(D.gateT);
   D.tray.last = s(D.tray.last); D.iconT = s(D.iconT);
   if (D.intro !== null) D.intro = s(D.intro);
-  if (D.toast) D.toast.t = s(D.toast.t);
   if (D.insp.banner) D.insp.banner.t = s(D.insp.banner.t);
   if (D.arrest) D.arrest.t0 = s(D.arrest.t0);
   if (D.ent) { D.ent.t0 = s(D.ent.t0); D.ent.tLeave = s(D.ent.tLeave); }

@@ -148,7 +148,7 @@ class Doc {
   }
 }
 
-// 《宪法与规则手册》：封面、目录、基本条例、支持地区、签名详情、版权页、封底；底部一排书签直接跳到各章。
+// 《宪法与规则手册》：封面、目录、基本条例、支持地区、企业名录、签名详情、版权页、封底；底部一排书签直接跳到各章。
 // 内容跟着这一班的规则组 rs 走：没有签名条例就没有「签名详情」一页，没有令牌就不列语言 / 时区。
 // 每页正文排到 PAGE_BOTTOM 就翻到续页（续页重复章节标题），窗口高度不会跟着内容一直长高。
 const MARK_H = 12;
@@ -268,27 +268,10 @@ class Rulebook {
     }
     endRegionPage();
 
-    // —— 三、签名详情：只有凭证和 API 授权带签名；令牌没有签名，所以不列 ——
-    const sealPages = [];
-    let seals = null, sy = 0, sealsBody = 0;
-    const newSealsPage = () => {
-      seals = page();
-      sealPages.push(seals);
-      sy = head(seals, sealPages.length === 1 ? '三、签名详情' : '三、签名详情（续）');
-      sealsBody = sy;
-    };
-    newSealsPage();
-    for (const key of ['cred', 'api']) {
-      if (sy > sealsBody && !fits(sy, 36)) newSealsPage();
-      seals.rows.push({ s: DOC_NAMES[key], y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
-      seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 31];
-      sy += 36;
-    }
-
-    // —— 四、企业名录（无尽模式难度 2）：能签发企业授权的企业、图标与所在地区；整张表是一个审查栏位 ——
+    // —— 三、企业名录（无尽模式难度 2）：能签发企业授权的企业、图标与所在地区；整张表是一个审查栏位 ——
     const entPage = page();
     if (rs.ent) {
-      let ey = head(entPage, '四、企业名录');
+      let ey = head(entPage, '三、企业名录');
       for (const [s, x] of [['企业', 30], ['所在地区', 124]]) entPage.rows.push({ s, y: ey, col: K.DIM, x });
       ey += 13;
       const top = ey;
@@ -297,6 +280,25 @@ class Rulebook {
         ey += 14;
       }
       entPage.fields['book.ent'] = [3, top - 4, this.w - 4, ey - 4];
+    }
+
+    // —— 四、签名详情：只有凭证和 API 授权带签名；令牌没有签名，所以不列 ——
+    // 没有企业名录（无尽模式难度 1）时，签名详情往前挪成第三章
+    const sealNo = rs.ent ? '四' : '三';
+    const sealPages = [];
+    let seals = null, sy = 0, sealsBody = 0;
+    const newSealsPage = () => {
+      seals = page();
+      sealPages.push(seals);
+      sy = head(seals, sealPages.length === 1 ? `${sealNo}、签名详情` : `${sealNo}、签名详情（续）`);
+      sealsBody = sy;
+    };
+    newSealsPage();
+    for (const key of ['cred', 'api']) {
+      if (sy > sealsBody && !fits(sy, 36)) newSealsPage();
+      seals.rows.push({ s: DOC_NAMES[key], y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
+      seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 31];
+      sy += 36;
     }
 
     mid(owner, 52, '本手册所有权属于', 8, K.DIM);
@@ -312,15 +314,15 @@ class Rulebook {
     mid(back, 114, '否则将受到', 8, K.RED);
     mid(back, 126, '严厉处罚', 8, K.RED);
 
-    // 页面顺序：封面 → 目录 → 各章（长章带续页）→ 版权页 → 封底
-    this.pages = [cover, toc].concat(rulesPages, regionPages, rs.seals ? sealPages : [], rs.ent ? [entPage] : [], [owner, back]);
+    // 页面顺序：封面 → 目录 → 各章（条例 → 地区 → 企业 → 签名，长章带续页）→ 版权页 → 封底
+    this.pages = [cover, toc].concat(rulesPages, regionPages, rs.ent ? [entPage] : [], rs.seals ? sealPages : [], [owner, back]);
     this.npages = this.pages.length;
     // 所有分页共用同一个高度：正文最长只排到 PAGE_BOTTOM，窗口不再随内容长高
     this.h = Math.max(140, PAGE_BOTTOM) + MARK_H + 2;
 
     // 目录只列章节的第一页，页码就是该章在手册里的第一页
     let y = head(toc, '目录');
-    [['一、基本条例', rulesPages[0]], ['二、支持地区', regionPages[0]], ['三、签名详情', sealPages[0]], ['四、企业名录', entPage]]
+    [['一、基本条例', rulesPages[0]], ['二、支持地区', regionPages[0]], ['三、企业名录', entPage], [`${sealNo}、签名详情`, sealPages[0]]]
       .filter(([, pg]) => pg && this.pages.includes(pg))
       .forEach(([s, pg]) => {
         toc.rows.push({ s, y, col: K.CYAN }, { s: `第 ${this.pages.indexOf(pg) + 1} 页`, y, col: K.DIM, x: this.w - 10, anchor: 'ra' });
@@ -331,8 +333,9 @@ class Rulebook {
     this.home = this.pages.indexOf(toc);   // 目录页：手册每次从桌面打开时默认停在这里
     this.page = this.home;
     this.tabs = pageTabs(this.w);
-    const marks = [['目录', toc, K.CLAUDE], ['条例', rulesPages[0], K.CYAN], ['地区', regionPages[0], K.GREEN], ['签名', sealPages[0], K.AMBER],
-      ['企业', entPage, K.CYAN_L]]
+    // 书签栏顺序跟着章节走（目录 → 条例 → 地区 → 企业 → 签名）；企业书签用绿色，和地区的浅青对调
+    const marks = [['目录', toc, K.CLAUDE], ['条例', rulesPages[0], K.CYAN], ['地区', regionPages[0], K.CYAN_L], ['企业', entPage, K.GREEN],
+      ['签名', sealPages[0], K.AMBER]]
       .filter(([, pg]) => this.pages.includes(pg));
     const mw = Math.floor((this.w - 8) / Math.max(1, marks.length));
     this.marks = marks.map(([label, pg, col], i) => ({
@@ -552,7 +555,7 @@ class InfoWin {
   }
 }
 
-// 通知：处分、事故
+// 通知：处罚、事故
 class NoticeWindow {
   constructor(title, lines, tone = 'red') {
     this.title = title;

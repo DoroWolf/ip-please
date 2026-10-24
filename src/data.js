@@ -73,10 +73,10 @@ const SIGNERS = {
 };
 const DOC_NAMES = { cred: '凭证', tok: '令牌', api: 'API 授权', voucher: '请求券', return: '临时返回页', env: '环境信息卡', ent: '企业授权' };
 // 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
-// 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、证件过期、特别关注对象，以及令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符，
-// 还有流量异常且嗅探出特殊进程的请求（traffic；难度 2 的条例「不得运行爬虫或自动化脚本」）
+// 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、特别关注对象，以及令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符，
+// 还有流量异常且嗅探出特殊进程的请求（traffic；难度 2 的条例「不得运行爬虫或自动化脚本」）。
 // 头像 / 昵称 / 企业授权的账号 / 使用设备这几种身份矛盾要先『验证 SMS』，不能直接拘留
-const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'exp', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake', 'device', 'traffic'];
+const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake', 'device', 'traffic'];
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
 // 审查出这些问题后拘留按钮亮起（issue.type）：除了上面的问题，还有 SMS 验证里查出的矛盾、嗅探出的特殊进程。
 // 流量异常本身不能拘留，要先请求嗅探、拿后台进程对照条例「不得运行爬虫或自动化脚本」，查到特殊进程（proc）才行

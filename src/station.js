@@ -6,8 +6,7 @@
 // 载入顺序见 index.html：station.js 必须先于 desk.js / inspect.js / render-station.js / intro.js。
 // 节奏差别在 MODES 里，生效的条例 / 证件在规则组里（无尽模式 FULL_RULES，故事模式每天一组 STORY）。
 
-const HUD = [0, 0, W - 1, 13];
-const PIPE = [0, 14, W - 1, 117];
+const PIPE = [0, 0, W - 1, 117];
 const REVIEW = [0, 118, 213, H - 1];
 const SCREEN = [216, 118, W - 1, H - 1];
 const DESK_AREA = [217, 119, W - 2, 343];
@@ -60,11 +59,11 @@ const quickKeys = () => !!RUN && RUN.mode !== 'story';
 const MODES = {
   timed: {
     name: '限时模式', en: 'TIME ATTACK', desc: ['在 10 分钟之内处理尽可能多的请求。'],
-    notice: '在10分钟内处理尽可能多的请求。每处理一个请求得一分。每收到一次事故将损失 30 秒。',
+    notice: '在10分钟内处理尽可能多的请求。每正确处理一个请求得一分。每收到一次事故将损失 30 秒。',
     arrive: [1.5, 3.5], pBad: 0.5, pace: 0.6,
   },
   perfect: {
-    name: '完美模式', en: 'PERFECT RUN', desc: ['收到记过处分即游戏结束。', '所得分数随时间递增。'],
+    name: '完美模式', en: 'PERFECT RUN', desc: ['收到记过处罚即游戏结束。', '所得分数随时间递增。'],
     notice: '通过处理请求来得分，不允许出事。第一分钟内每个请求得十分，之后每过一分钟递减一分。注意提高工作效率。',
     arrive: [2.5, 5], pBad: 0.5, pace: 0.8,
   },
@@ -74,8 +73,8 @@ const MODES = {
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
   endure: {
-    name: '耐力模式', en: 'ENDURANCE', desc: ['处理请求直到 token 为负。', '注意避免受到事故处分。'],
-    notice: '持续处理请求，直到你的 Token 降到零下。事故处分的罚分会逐次递增。',
+    name: '耐力模式', en: 'ENDURANCE', desc: ['处理请求直到 token 为负。', '注意避免受到事故处罚。'],
+    notice: '持续处理请求，直到你的 Token 降到零下。处罚的罚分会逐次递增。',
     arrive: [2.5, 5.5], pBad: 0.45, pace: 1,
   },
 };
@@ -84,21 +83,22 @@ const MODES = {
 const DIFFS = [
   { name: '难度 1', desc: '证件：凭证、令牌、API 授权' },
   {
-    name: '难度 2', desc: '新增证件与条例：环境信息卡、企业授权、禁止爬虫 / 自动化脚本'},
+    name: '难度 2', desc: '新增证件：环境信息卡、企业授权'},
 ];
 const TIMED_LEN = 600, DAY_LEN = 120, DAY_LEN_LATE = 180, PENALTY_SEC = 30, PAY = 5, FINE_STEP = 5;
 const SCORE_UP = 1, SCORE_DOWN = 5;                 // 耐力模式：正确 +1，失误 -5
 const SUSPEND_SEC = 5, SUSPEND_PTS = 2;             // 拘留奖励：限时模式 +5 秒，耐力模式该单共得 2 分
+const TIP_DUR = 3;                                  // 顶部数据右侧的加减提示闪烁多久（秒）
 
-// 事故处分单（三个模式统一）：第 1 次警告、第 2 次最后警告、第 3／4 次罚 5 token，之后每次 +5
+// 事故处罚单（三个模式统一）：第 1 次警告、第 2 次最后警告、第 3／4 次罚 5 token，之后每次 +5
 function citationFine(n) {
   return n <= 2 ? 0 : FINE_STEP * Math.max(1, n - 3);
 }
 
 function citationLines(n) {
-  if (n === 1) return ['处分：予以警告，暂不处分。'];
-  if (n === 2) return ['处分：最后警告，暂不处分。'];
-  return [`处分：罚款 ${citationFine(n)} token。`];
+  if (n === 1) return ['处罚：予以警告，暂不处罚。'];
+  if (n === 2) return ['处罚：最后警告，暂不处罚。'];
+  return [`处罚：罚款 ${citationFine(n)} token。`];
 }
 // 故事模式：前三天 08:00→12:00（现实 2 分钟）；第四天起延长到 08:00→15:00（现实 3 分钟）
 // 过热降频：前两天的班次不受影响，第三天起提前一小时下班
@@ -128,12 +128,17 @@ function startShift() {
   D = {
     started: false, tStart: 0, timeAdj: 0,
     queue: [], nextArrive: 0, ent: null, wins: [], icons: [], lines: [], chat: [], timers: [], flows: [],
-    insp: { on: false, sel: [], banner: null }, toast: null, gateT: -9,
+    insp: { on: false, sel: [], banner: null }, gateT: -9,
     closing: false, over: false, ended: false,
     pay: 0, fines: 0, cites: 0, correct: 0, total: 0, hinted: {},
     intro: now, typed: -1, seq: 0, tray: { open: false, u: 0, last: now, pin: false }, arrest: null,
-    paused: false, pauseAt: 0, iconScroll: 0, iconT: now,
+    paused: false, pauseAt: 0, iconScroll: 0, iconT: now, tips: {},
   };
+  // 完美模式：分数右侧常驻显示这一单的加分（开局 +10，之后每过一分钟降一分）
+  if (RUN.mode === 'perfect') {
+    D.unitShown = unitValue();
+    statTip('score', `+${D.unitShown}`, K.GREEN, true, 0);
+  }
   // 上班时门口早已挤满请求，队尾一直排到看不见的地方
   for (let i = 0; i < QUEUE_CAP; i++) D.queue.push(newPacket(-1));
   const rs = rules();
@@ -148,8 +153,6 @@ function startShift() {
       title: `无尽 - ${M.name}`, body: M.notice, wanted: D.wanted,
     });
   addWin(D.notice, 'notice', 316, 126);
-  if (RUN.mode === 'story' && RUN.stale) toast('训练数据过期：今天无法使用『审查』', K.AMBER);
-  if (RUN.mode === 'story' && RUN.hot) toast(hotThrottle() ? '过热降频：今天提前一小时下线' : '过热降频：今天照常下班', K.AMBER);
 }
 
 function later(dt, fn) { D.timers.push({ t: now + dt, fn }); }
@@ -159,6 +162,13 @@ function runTimers() {
   if (!due.length) return;
   D.timers = D.timers.filter((x) => x.t > now);
   due.sort((a, b) => a.t - b.t).forEach((x) => x.fn());
+}
+
+// 顶部数据右侧的加减提示：在 dur 秒内闪烁，之后消失。
+// hold = 过了 dur 还留着（完美模式的每单加分一直显示，只在降分时闪一下）。
+function statTip(field, text, col, hold = false, dur = TIP_DUR) {
+  if (!D) return;
+  D.tips[field] = { text, t0: now, dur, hold, col };
 }
 
 function newPacket(t) {
@@ -172,12 +182,12 @@ function say(who, text, key = null) {
   SFX.mumble(text, who === 'C' ? 176 : D.ent ? D.ent.voice : 125, D.lines.length * 7);
 }
 
-function toast(text, col = K.CYAN) { D.toast = { text, col, t: now }; }
-
 // —— 时间：第一次点『下一位』之前一直停着；暂停期间也停住 ——
 const elapsed = () => (D.started ? now - D.tStart - (D.paused ? now - D.pauseAt : 0) : 0);
 const timeLeft = () => TIMED_LEN - elapsed() + D.timeAdj;
-const unitValue = () => Math.max(1, 10 - Math.floor(elapsed() / 60));   // 完美模式：每单分数
+// 完美模式：第一分钟内每单 10 分，之后每过一分钟降 1 分；最低 1 分（磨到十分钟以上也不会出现 +0 或负分）
+const PERFECT_UNIT = 10, PERFECT_MIN = 1, PERFECT_STEP_SEC = 60;
+const unitValue = () => Math.max(PERFECT_MIN, PERFECT_UNIT - Math.floor(elapsed() / PERFECT_STEP_SEC));
 const dayU = () => clamp(elapsed() / storyDayLen());                    // 故事模式：08:00 a.m. → 12:00 p.m.（第四天起 → 03:00 p.m.）
 const closeAt = () => (hotThrottle() ? (shiftSpan() - HOT_EARLY_MIN) / shiftSpan() : 1);   // 过热降频：第三天起提前一小时下线
 
@@ -194,11 +204,8 @@ const lastHour = () => RUN.mode === 'story' && !D.closing && shiftEndMin() - (SH
 // ———————————————————— 请求进出 ————————————————————
 
 function callNext() {
-  if (D.ent && D.ent.decided && !D.ent.leaving) { toast('先把证件拖回头像处，还给对方', K.AMBER); return; }
   if (D.ent || D.ended || RUN.fail) return;
-  if (D.over) { toast('时间到，不再接新请求', K.AMBER); return; }
-  if (D.closing) { toast('已经下班，不再接新请求'); return; }
-  if (!D.queue.length) { toast('队列暂时为空，等待新请求……'); return; }
+  if (D.over || D.closing || !D.queue.length) return;
   if (!D.started) { D.started = true; D.tStart = now; D.nextArrive = now + 1; }
   SFX.play('intercom', 0.8);
   D.queue.shift();
@@ -245,8 +252,6 @@ const measureAvailable = (e) => canSmsNow(e) || canSniffNow(e) || canSuspendNow(
 // 能盖章的证件：凭证；凭证缺失且询问过之后，由系统派发的临时返回页（只能凭票返回，不能代替凭证放行）
 const isStampDoc = (win) => !!win && (win.key === 'cred' || win.key === 'return');
 const stampDocOf = (e) => (e ? e.spec.docs.find((d) => isStampDoc(d)) : null);
-// 交还证件时提示盖哪一张：只有询问「凭证缺失」后派发了临时返回页，才说临时返回页；其余一律先说凭证
-const stampName = (e) => (e && e.spec.docs.some((d) => d.key === 'return') ? '临时返回页' : '凭证');
 
 // 凭证缺失：只有在「审查」出问题并按下『询问』之后，系统才派发临时返回页，直接放到桌面上代替凭证接受盖章
 function issueReturnTicket(e) {
@@ -256,7 +261,6 @@ function issueReturnTicket(e) {
   e.spec.docs.push(doc);
   addWin(doc, 'doc', ...clampDesk(250, 160, doc));
   SFX.play('select');
-  toast('未收到凭证：临时返回页已放到桌面', K.AMBER);
 }
 
 // 做出决定：在凭证上盖章。交还证件前随时可以改主意，重新盖章只是换章，不判定。
@@ -265,7 +269,7 @@ function decide(kind) {
   const e = D.ent;
   if (!e || !e.handed || e.leaving || RUN.fail) return;
   // 没有凭证：必须先审查出「凭证缺失」并询问，拿到临时返回页才能盖章
-  if (!stampDocOf(e)) { toast('没有凭证：先审查出「凭证缺失」并询问，拿到临时返回页再盖章', K.AMBER); return; }
+  if (!stampDocOf(e)) return;
   if (e.decided === kind) return;
   e.decided = kind;
   const doc = stampDocOf(e);
@@ -286,13 +290,13 @@ function finishRequest(e) {
   later(e.decided === 'suspend' ? 1.4 : 0.6, () => { if (D.ent === e) D.ent = null; });
 }
 
-// 拘留：审查出伪造签名、身份矛盾、证件过期或特别关注对象，并询问异常之后才能用。
+// 拘留：审查出可拘留的问题（见 data.js 的 SUSPEND_FLAWS）并询问异常之后才能用。
 // 头像 / 昵称 / 企业授权账号 / 使用设备这几种身份矛盾要先『验证 SMS』（按钮优先显示验证SMS），确认冒用后才轮到这里。
 // 切断连接，桌面上和柜台上的证件全部清掉，直接判定
 function suspend() {
   const e = D.ent;
   if (!canSuspendNow(e) || RUN.fail) return;
-  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  if (!e.measureReady) return;
   const docs = e.spec.docs;
   if (drag && docs.includes(drag.inst.win)) drag = null;
   D.icons = D.icons.filter((ic) => !docs.includes(ic.win));
@@ -305,33 +309,42 @@ function suspend() {
   finishRequest(e);
 }
 
-// 合规但看着可疑的请求被拒绝 / 拘留时，处分单上的说明
+// 合规但看着可疑的请求被拘留时，处罚单上的说明（直接拒绝按程序视为合规，不会走到这里）
 const LEGIT_LINES = {
   photo: '本人换过头像，可经 SMS 验证确认', name: '本人改过昵称，可经 SMS 验证确认',
   ent_acct: '本人换过企业账号，可经 SMS 验证确认',
   device: '本人换了设备，可经 SMS 验证确认', traffic: '流量来自正常进程，可经请求嗅探确认',
 };
 
+// 只要查出问题（spec.legit：头像 / 昵称 / 企业账号 / 使用设备 / 流量异常），直接拒绝也是合规处置：
+// 按程序拒绝不算事故；验证 SMS / 请求嗅探只用来确认能不能放行。
+const denyLegit = (e, kind) => kind === 'deny' && !!e.spec.legit;
+
 function judge(e, kind) {
   const spec = e.spec;
   // 临时返回页不能代替凭证：票可以盖章，但拿它盖「放行」，交还证件后一律判为事故（理由：凭证缺失）
   const stamp = stampDocOf(e);
   const passOnTicket = kind === 'approve' && !!stamp && stamp.key === 'return';
-  const right = kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null);
+  const proceduralDeny = denyLegit(e, kind);
+  const right = proceduralDeny || (kind === 'suspend' ? SUSPEND_FLAWS.includes(spec.flaw) : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
   RUN.processed++; D.total++;
-  if (RUN.mode === 'timed') RUN.score++;
   // 放行：网关对通过的请求说一句标准招呼
   if (kind === 'approve') say('C', '欢迎使用 Claude。');
   if (right) {
     RUN.correct++; D.correct++; RUN.streak++;
+    // 限时模式：只有正确处理才得一分（受处罚的一单不计分，分数栏也不显示提示）
+    if (RUN.mode === 'timed') { RUN.score++; statTip('score', `+${SCORE_UP}`, K.GREEN); }
     if (kind === 'suspend') RUN.detained++;
-    if (RUN.mode === 'timed' && kind === 'suspend') { D.timeAdj += SUSPEND_SEC; toast(`拘留成功 +${SUSPEND_SEC} 秒`, K.GREEN); }
-    if (RUN.mode === 'perfect') { const v = unitValue(); RUN.score += v; toast(`+${v}`, K.GREEN); }
+    if (RUN.mode === 'timed' && kind === 'suspend') {
+      D.timeAdj += SUSPEND_SEC;
+      statTip('time', `+${SUSPEND_SEC}s`, K.GREEN);
+    }
+    if (RUN.mode === 'perfect') RUN.score += unitValue();
     if (RUN.mode === 'endure') {
       const v = kind === 'suspend' ? SUSPEND_PTS : SCORE_UP;
       RUN.score += v;
       RUN.peak = Math.max(RUN.peak, RUN.score);   // 结算分数取到达过的最大 token
-      toast(kind === 'suspend' ? `拘留成功 +${v}` : `+${v}`, K.GREEN);
+      statTip('score', `+${v}`, K.GREEN);
     }
     if (RUN.mode === 'story') D.pay += PAY;
     return;
@@ -341,19 +354,23 @@ function judge(e, kind) {
   const cite = citationLines(RUN.cites);
   const lines = kind === 'approve'
     ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
-    : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? LEGIT_LINES[spec.legit] : '证件齐全，信息一致'];
+    : kind === 'suspend' && spec.flaw !== null
+      ? ['拘留了不得拘留的请求：', spec.reason]
+      : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? LEGIT_LINES[spec.legit] : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
-    notice('处分通知', lines.concat(cite));
+    statTip('time', `-${PENALTY_SEC}s`, K.RED);
+    notice('处罚通知', lines.concat(cite));
   } else if (RUN.mode === 'perfect') {
     RUN.fail = lines;
-    notice('处分通知', lines.concat(cite));
+    notice('处罚通知', lines.concat(cite));
     workOver();
     later(2, finishRun);
   } else if (RUN.mode === 'endure') {
     RUN.score -= SCORE_DOWN;
+    statTip('score', `-${SCORE_DOWN}`, K.RED);
     const over = RUN.score < 0;
-    notice('处分通知', lines.concat(cite));
+    notice('处罚通知', lines.concat(cite));
     if (over) {
       RUN.fail = lines.concat(['分数为负：节点停机']);
       workOver();
@@ -362,7 +379,7 @@ function judge(e, kind) {
   } else {
     D.cites++;
     D.fines += citationFine(RUN.cites);
-    notice('处分通知', lines.concat(cite));
+    notice('处罚通知', lines.concat(cite));
   }
 }
 
@@ -385,7 +402,7 @@ function finishRun() {
   if (D.ended) return;
   D.ended = true;
   // 耐力模式的结算分数取到达过的最大 token，但不要改写 RUN.score：
-  // 转场压黑时 HUD 还画着 RUN.score，改写会让顶部的 Token 突然跳到最高值（见 screens.js 的 finalScore）
+  // 转场压黑时顶部数据还画着 RUN.score，改写会让 Token 突然跳到最高值（见 screens.js 的 finalScore）
   saveRecord();
   fadeGo('result', 0.9, 0.5);   // 先慢慢压黑，再从黑屏进入结算
 }
@@ -396,7 +413,6 @@ function closeShift() {
   for (const p of D.queue) p.leave = now + Math.random() * 0.4;
   later(1.8, () => { D.queue = []; });
   SFX.play('bell');
-  toast(`排队的请求已离开`, K.AMBER);
 }
 
 function endDay() {
@@ -415,6 +431,14 @@ function updateDesk() {
   D.iconT = now;
   updateCounter(dt);
   if (D.ended || !D.started) return;
+  // 完美模式：每过一分钟每单的加分降一分，分数右侧的提示跟着换（换的时候闪 3 秒）
+  if (RUN.mode === 'perfect') {
+    const v = unitValue();
+    if (v !== D.unitShown) {
+      D.unitShown = v;
+      statTip('score', `+${v}`, K.GREEN, true);
+    }
+  }
   const m = mode();
   if (!D.closing && !D.over && now >= D.nextArrive) {
     if (D.queue.length < QUEUE_CAP) D.queue.push(newPacket(now));
@@ -422,10 +446,7 @@ function updateDesk() {
   }
   // 限时模式：时间到后不再进件，审完手头上的请求才结算
   if (RUN.mode === 'timed') {
-    if (!D.over && timeLeft() <= 0) {
-      workOver();
-      toast('时间到：审完手头上的请求后结算', K.AMBER);
-    }
+    if (!D.over && timeLeft() <= 0) workOver();
     if (D.over && !D.ent) finishRun();
   }
   if (RUN.mode === 'story' && !D.closing && dayU() >= closeAt()) closeShift();

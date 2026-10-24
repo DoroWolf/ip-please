@@ -329,7 +329,7 @@ function statusAfter() {
 function drawSummary(t) {
   rect(0, 0, W - 1, H - 1, K.BG);
   txt(W / 2, 20, `DAY ${RUN.day} · 下线`, 12, K.WHITE, 'ma');
-  txt(W / 2, 36, `今日处理 ${SUM.total} 个请求，正确 ${SUM.correct} 个，处分 ${SUM.cites} 次`, 10, K.DIM, 'ma');
+  txt(W / 2, 36, `今日处理 ${SUM.total} 个请求，正确 ${SUM.correct} 个，处罚 ${SUM.cites} 次`, 10, K.DIM, 'ma');
   rect(60, 50, W - 60, 50, K.LINE);
   let y = 60, k = 0;
   const shown = (i) => t >= 0.3 + i * 0.15;

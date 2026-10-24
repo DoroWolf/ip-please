@@ -7,7 +7,7 @@
 function setInspect(on) {
   if (D.insp.on === on) return;
   if (on && !rules().inspect) return;   // 规则组没有『审查』（故事模式第一天）
-  if (on && RUN.mode === 'story' && RUN.stale) { toast('训练数据过期：今天无法使用『审查』', K.AMBER); return; }
+  if (on && RUN.mode === 'story' && RUN.stale) return;
   D.insp.on = on;
   D.insp.sel = [];
   if (!on && D.insp.banner && !D.insp.banner.ok) D.insp.banner = null;
@@ -69,12 +69,9 @@ function inspectClick(x, y) {
   const e = D.ent;
   if (res.kind !== 'bad') return;
   const t = res.issue.type;
-  if (SMS_ISSUES.includes(t) && !e.canSms) { e.canSms = true; toast('身份存疑：先点『询问』，再验证 SMS', K.GREEN); }
-  if (SNIFF_ISSUES.includes(t) && !e.canSniff) { e.canSniff = true; toast('流量异常：先点『询问』，再请求嗅探', K.GREEN); }
-  if (SUSPEND_ISSUES.includes(t) && rules().redTeam && !e.canSuspend) {
-    e.canSuspend = true;
-    if (!SMS_ISSUES.includes(t)) toast('可以拘留：先点『询问』，再按『拘留』', K.RED);
-  }
+  if (SMS_ISSUES.includes(t)) e.canSms = true;
+  if (SNIFF_ISSUES.includes(t)) e.canSniff = true;
+  if (SUSPEND_ISSUES.includes(t) && rules().redTeam) e.canSuspend = true;
 }
 
 function askAbout(issue) {
@@ -94,8 +91,8 @@ function askAbout(issue) {
 function smsOpen() {
   const e = D.ent;
   if (!e || e.leaving) return;
-  if (e.smsSent) { toast('已经发过验证 SMS 了', K.AMBER); return; }
-  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  if (e.smsSent) return;
+  if (!e.measureReady) return;
   e.measureUsed = 'sms';   // 措施按下后锁定，直到审查出新的异常并重新询问（记下按的是哪个，按钮锁定时照样显示）
   e.measureReady = false;
   const w = D.wins.find((o) => o.kind === 'smsf');
@@ -103,7 +100,6 @@ function smsOpen() {
   const win = new InfoWin('smsf', '验证 SMS', 'SMS', [['手机', '________________']], '', '将此表单交给用户');
   addWin(win, 'smsf', ...clampDesk(236, 160, win));
   SFX.play('select');
-  toast('把表单拖到头像上，发给对方填写', K.GREEN);
 }
 
 function smsSend(w) {
@@ -128,7 +124,6 @@ function smsSend(w) {
       '用户的手机与使用的昵称 / 曾用名必须符合本记录');
     addWin(rec, 'sms', ...clampDesk(250, 214, rec));
     SFX.play('intercom', 0.6);
-    toast('身份记录已打印：核对手机号或曾用名', K.GREEN);
   });
 }
 
@@ -140,8 +135,8 @@ function smsSend(w) {
 function sniffOpen() {
   const e = D.ent;
   if (!e || e.leaving) return;
-  if (e.sniffed) { toast('已经嗅探过了', K.AMBER); return; }
-  if (!e.measureReady) { toast('先询问异常，再采取措施', K.AMBER); return; }
+  if (e.sniffed) return;
+  if (!e.measureReady) return;
   e.sniffed = true;
   e.measureUsed = 'sniff';
   e.measureReady = false;
@@ -154,6 +149,5 @@ function sniffOpen() {
       [['请求流量', s.flow, true], ['前台进程', s.fg], ['后台进程', s.bg, true]]);
     addWin(rep, 'sniff', ...clampDesk(250, 190, rep));
     SFX.play('intercom', 0.6);
-    toast('嗅探报告已打印：对照条例核对后台进程', K.GREEN);
   });
 }
