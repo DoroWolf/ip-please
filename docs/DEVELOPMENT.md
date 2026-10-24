@@ -54,7 +54,7 @@ python -m http.server
 
 1. `newRun(mode)` 建 `RUN`；进入检查站时 `startShift()` 建 `D`，并按规则组生成规则手册和官方通告。
 2. 点『下一位』→ `callNext()` → `makeRequest(today(), mode().pBad, D.wanted, rules())` 生成一个请求 `spec`。
-3. `rules()` 在故事模式返回当天的 `STORY` 规则组，无尽模式按 `RUN.diff` 返回 `ENDLESS_RULES` 里的一组（难度 1 = `FULL_RULES`，难度 2 = `FULL_RULES_2`，难度 3 = `FULL_RULES_3`）。难度的名称、简介和通告附页在 `station.js` 的 `DIFFS`；最佳纪录按难度分开存（难度 1 沿用原来的键）。标题页的难度按钮按四档预留（`screens.js` 的 `DIFF_SLOTS`），之后往 `DIFFS` 加档位就会自动均分同一排的宽度。无尽模式的世界观日期跟着难度走：难度 1 是 2078.01.01，难度 2 是 2078.01.02，难度 3 是 2078.01.03（`data.js` 的 `worldDate`）。难度 3 的 KYC 证明是 `docs.js` 的 `KycDoc`（护照式版面，底部有「人格有限公司」的核验签名），支付凭证沿用 `Doc`；企业账户不出支付凭证，但仍要出示 KYC 证明。
+3. `rules()` 在故事模式返回当天的 `STORY` 规则组，无尽模式按 `RUN.diff` 返回 `ENDLESS_RULES` 里的一组（难度 1 = `FULL_RULES`，难度 2 = `FULL_RULES_2`，难度 3 = `FULL_RULES_3`）。难度的名称、简介和通告附页在 `station.js` 的 `DIFFS`；最佳纪录按难度分开存（难度 1 沿用原来的键）。标题页的难度按钮按四档预留（`screens.js` 的 `DIFF_SLOTS`），之后往 `DIFFS` 加档位就会自动均分同一排的宽度。无尽模式的世界观日期跟着难度走：难度 1 是 2078.01.01，难度 2 是 2078.01.02，难度 3 是 2078.01.03（`data.js` 的 `worldDate`）。难度 3 的 KYC 证明是 `docs.js` 的 `KycDoc`（护照式版面，底部有「人格有限公司」的核验签名），支付凭证沿用 `Doc`；企业账户不出支付凭证，但仍要出示 KYC 证明。KYC 证明的出生地与住址必须在同一地区（可以是不支持地区，不使用朝鲜），不符视为伪造证件、可以拘留；KYC 出生地与凭证地区不符、KYC 住址与账单地址不符时先验证 SMS，出生地不与账单地址比对。
 4. 玩家盖章 → `decide(kind)`；交还全部证件 → `finishRequest()` → `judge(e, kind)` 按 `spec.flaw`（以及同时存在的可拘留疑点）判定对错。只要审查出问题（`spec.legit`：头像 / 昵称 / 设备 / 流量 / 企业账号 / 支付凭证地址手机号），直接拒绝也算正确处理（`denyLegit`）；证件过期不能拘留（不在 `SUSPEND_FLAWS` 里）。
 5. 审查模式用 `fieldBoxes()` 收集可点栏位（证件栏位、手册条例、任务栏日期、审查窗字段、通告、SMS 档案、嗅探报告），`compareOutcome()` 用 `spec.issues` / `spec.notes` / `spec.checks` 区分 矛盾 / 无矛盾 / 无关联。
 

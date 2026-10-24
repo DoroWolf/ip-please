@@ -212,7 +212,12 @@ with sync_playwright() as p:
         slots: DIFF_SLOTS,
         fourWidth: 4 * w4 + DIFF_GAP * 3,
         room: W - 80,
-        descFits: DIFFS.every((d) => tw(d.desc, 8) <= w4 - 12),
+        // 说明太长时按钮里会折行（四档并排时每格较窄），按钮高度按两行预留：
+        // 只要最多折成两行、每行都放得下，就不算溢出
+        descFits: DIFFS.every((d) => {
+          const lines = wrap(d.desc, 8, w4 - 12);
+          return lines.length <= 2 && lines.every((ln) => tw(ln, 8) <= w4 - 12);
+        }),
       };
     })()""")
     print("difficulty slots:", json.dumps(diff_layout))
@@ -338,6 +343,28 @@ with sync_playwright() as p:
     print("inspect slide:", json.dumps(sel, ensure_ascii=False))
     if sel != ["rv.昵称", "rv.类型"]:
         errors.append("审查选择没有按滑动窗口只保留最近两项")
+    # 任务栏压在所有窗口之上：证件窗口盖住日期框时，点日期框仍应选中 sys.日期
+    date_case = page.evaluate("""(() => {
+      const doc = new Doc('cred', [['IP', '203.0.113.7'], ['昵称', 'test'], ['地区', '美国'], ['有效期', '2078.01.01']], null);
+      const w = addWin(doc, 'doc', 520, DESK_AREA[3] - TITLE_H);
+      const b = dateBox();
+      const pt = [Math.round((b[0] + b[2]) / 2), Math.round((b[1] + b[3]) / 2)];
+      const covered = inBox(pt[0], pt[1], winBox(w));
+      setInspect(false); setInspect(true);
+      deskDown(pt[0], pt[1]); deskUp(pt[0], pt[1]);
+      const out = {
+        covered, point: pt,
+        field: fieldAt(pt[0], pt[1]) && fieldAt(pt[0], pt[1]).key,
+        sel: D.insp.sel.map((s) => s.key),
+      };
+      D.wins = D.wins.filter((o) => o !== w);
+      setInspect(false);
+      lastTap.t = -9;
+      return out;
+    })()""")
+    print("date click under window:", json.dumps(date_case, ensure_ascii=False))
+    if not date_case["covered"] or date_case["field"] != "sys.日期" or "sys.日期" not in date_case["sel"]:
+        errors.append("证件窗口盖住任务栏时，日期框无法审查")
     page.evaluate("setInspect(false)")
     # 柜台证件溢出：指针贴在左右边缘时自动滚动
     page.evaluate("""(() => {

@@ -69,7 +69,7 @@ const SFX = (() => {
 
   function sine(freq, n) { const p = phase(freq, n); return p.map(Math.sin); }
 
-  function decay(n, tau) { const x = new Float32Array(n); for (let i = 0; i < n; i++) x[i] = Math.brw(-i / (tau * SR)); return x; }
+  function decay(n, tau) { const x = new Float32Array(n); for (let i = 0; i < n; i++) x[i] = Math.exp(-i / (tau * SR)); return x; }
 
   const mul = (a, b) => { const x = new Float32Array(a.length); for (let i = 0; i < a.length; i++) x[i] = a[i] * (typeof b === 'number' ? b : b[i]); return x; };
   const add = (a, b, g = 1) => { const x = new Float32Array(a.length); for (let i = 0; i < a.length; i++) x[i] = a[i] + (i < b.length ? b[i] * g : 0); return x; };
@@ -151,7 +151,7 @@ const SFX = (() => {
     const crinkle = new Float32Array(n);
     for (let i = 0; i < n; i++) crinkle[i] = r() < 0.02 ? 0.5 + r() : 0;
     const cr = filt(crinkle, 'lowpass', 300);
-    for (let i = 0; i < n; i++) x[i] *= (0.6 + cr[i] * 8) * Math.min(1, i / N(0.02)) * Math.brw(-i / (0.05 * SR));
+    for (let i = 0; i < n; i++) x[i] *= (0.6 + cr[i] * 8) * Math.min(1, i / N(0.02)) * Math.exp(-i / (0.05 * SR));
     return norm(x, 0.2);
   }
 
@@ -310,7 +310,7 @@ const SFX = (() => {
     const x = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const t = i / SR;
-      x[i] = (a[i] * 0.6 + b[i] * 0.4 + c[i] * 0.3) * Math.min(1, t / 0.012) * (0.75 + 0.25 * Math.brw(-t / 0.08));
+      x[i] = (a[i] * 0.6 + b[i] * 0.4 + c[i] * 0.3) * Math.min(1, t / 0.012) * (0.75 + 0.25 * Math.exp(-t / 0.08));
     }
     return filt(fade(x, 0.005, 0.05), 'lowpass', 2600);
   }

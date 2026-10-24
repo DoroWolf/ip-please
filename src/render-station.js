@@ -150,7 +150,7 @@ function drawPipe() {
 
 // —— 左下：审查窗 ——
 // 柜台图标下的短名：证件名太长的换成简称（图标间距只有 32px）
-const ICON_LABELS = { api: 'API', return: '返回票', env: '环境卡', ent: '企业', pay: '支付', kyc: 'KYC' };
+const ICON_LABELS = { brw: '浏览器', api: 'API', return: '返回票', env: '环境卡', ent: '企业', pay: '支付', kyc: 'KYC' };
 function drawReview() {
   const [x0, y0, x1, y1] = REVIEW;
   rect(x0, y0, x1, y1, K.BG);
@@ -429,6 +429,8 @@ function drawInspect() {
 }
 
 function topWinAt([x, y]) {
+  // 任务栏画在所有窗口之上：指针在任务栏上时，底下的窗口（含手册 / 通告的页签）不算命中
+  if (inBox(x, y, TASKBAR)) return null;
   for (const w of shownWins().reverse()) if (inBox(x, y, winBox(w))) return w;
   return null;
 }

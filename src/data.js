@@ -26,7 +26,7 @@
 //          验证 SMS 'smsf.手机'（对方填的号码）/ 'sms.昵称' 'sms.手机' 'sms.曾用名'（身份记录），
 //          请求嗅探 'sniff.请求流量' / 'sniff.后台进程'（嗅探报告），
 //          难度 3：凭证 'cred.套餐'，支付凭证 'pay.IP' / 'pay.付款账户' / 'pay.账单地址' / 'pay.手机号'，
-//          KYC 证明 'kyc.地区' / 'kyc.住址' / 'kyc.出生日期' / 'kyc.记录' / 'kyc.签名'（人像与真实姓名只是装饰，不登记栏位），
+//          KYC 证明 'kyc.出生地' / 'kyc.住址' / 'kyc.出生日期' / 'kyc.记录' / 'kyc.签名'（人像与真实姓名只是装饰，不登记栏位），
 //          手册 'rule.pay' / 'rule.billing' / 'rule.vcard' / 'rule.age'（'rule.kyc_date' 隐藏，不登记栏位）
 
 const WORLD_DATE = new Date(2078, 0, 1);   // 无尽模式难度 1 的世界观日期（难度 2 见 worldDate）
@@ -60,6 +60,8 @@ const REGION_LOCALE = {
   '伊朗': ['fa-IR', 'UTC+03:30'],
   '朝鲜': ['ko-KP', 'UTC+09:00'],
 };
+// KYC 证明的出生地 / 住址不使用朝鲜（证件内容限制）
+const KYC_REGIONS = Object.keys(REGION_LOCALE).filter((r) => r !== '朝鲜');
 
 // —— 数字签名：签名跟着签发机构走 ——
 // 凭证原本由安索兹卡身份局签发，现在改用安全部会话中心（原浏览器令牌）的签名；浏览器令牌没有签名；API 授权仍由安全部接口管理处签发；
@@ -82,11 +84,11 @@ const DOC_NAMES = { cred: '凭证', brw: '浏览器令牌', api: 'API 授权', v
   pay: '支付凭证', kyc: 'KYC 证明' };
 // 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
 // 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、特别关注对象，以及浏览器令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符、
-// 凭证地区不在支持地区、未满 13 岁、付款账户是虚拟支付卡、KYC 地区与凭证地区不符、流量异常且嗅探出特殊进程（traffic）。
+// 凭证地区不在支持地区、未满 13 岁、付款账户是虚拟支付卡、流量异常且嗅探出特殊进程（traffic）。
 // 头像 / 昵称 / 企业授权的账号 / 使用设备这几种身份矛盾要先『验证 SMS』，不能直接拘留。
-// 支付凭证的账单地址 / 手机号异常也要先验证 SMS：号对得上就放行，对不上就产生手机号不符，询问后可以拘留。
+// 支付凭证的账单地址 / 手机号异常、KYC 住址与账单地址不符也要先验证 SMS：号对得上就放行，对不上就产生手机号不符，询问后可以拘留。
 const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake', 'device', 'traffic',
-  'pay_region', 'pay_phone', 'bill_kyc', 'kyc_region', 'region', 'minor', 'vcard'];
+  'pay_region', 'pay_phone', 'bill_kyc', 'kyc_forged', 'region', 'minor', 'vcard'];
 // 企业授权自身的问题（授权企业一栏不含 Anthrotzka 的 ent_auth、凭证地区与签发企业所在地区不符的 ent_region）
 // 只能拒绝，不能拘留：它们说明证件无效，不等同于伪造或冒用
 const WANTED_N = 3, WANTED_TAGS = 'ABC', P_WANTED = 0.08;
@@ -97,7 +99,7 @@ const SUSPEND_ISSUES = SUSPEND_FLAWS.filter((t) => t !== 'traffic').concat(['pho
 // 支付凭证的账单地址 / 手机号异常也先『验证 SMS』：号对得上就是本人，正常放行；对不上就是手机号不符，可以拘留。
 // P_LEGIT：合规请求里本人换过头像 / 改过昵称 / 换过企业账号 / 换了设备 / 支付凭证地址手机号有出入 / 流量来自正常进程的比例
 const PAY_SMS = ['pay_region', 'pay_phone', 'bill_kyc'];
-const SMS_ISSUES = ['photo', 'name', 'device', 'ent_acct', ...PAY_SMS], P_LEGIT = 0.12;
+const SMS_ISSUES = ['photo', 'name', 'device', 'ent_acct', ...PAY_SMS, 'kyc_region'], P_LEGIT = 0.12;
 // 请求流量与平均流量相差太多时可以『请求嗅探』（可能开了特殊进程）
 const SNIFF_ISSUES = ['traffic'];
 // 身份记录的曾用名：有时候一个都没有（档案上印「无」）；本人改过昵称 / 换过企业账号的合规请求一定留着旧昵称
@@ -182,13 +184,14 @@ const NORMAL_PROCS = ['OneDrive（云盘同步）', 'Google Drive（云盘同步
 // 登记 IP、付款账户、账单地址、手机号。
 // IP 对凭证；账单地址的城市、手机号的国家码对凭证地区；账单地址还要和 KYC 证明的住址一字不差。
 // 账单地址 / 手机号看起来不符时先验证 SMS，SMS 通过就正常放行；付款账户不得是虚拟支付卡。
-// KYC 证明：所有用户都要出示，仿照护照：上方是地区、住址、出生日期（人像与真实姓名只是装饰），下方是 KYC 更新记录，
-// 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的核验签名。地区对凭证地区；出生日期要年满 13 岁；
-// 最近一次 KYC 更新须在三年之内。
+// KYC 证明：所有用户都要出示，仿照护照：上方是出生地、住址、出生日期（人像与真实姓名只是装饰），下方是 KYC 更新记录，
+// 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的核验签名。出生地与住址必须在同一地区（可以是不支持地区，但不使用朝鲜），
+// 对不上视为伪造证件；KYC 住址与账单地址不符时先验证 SMS；出生地不与账单地址比对。出生日期要年满 13 岁；最近一次 KYC 更新须在三年之内。
 // 支付凭证的账单地址 / 手机号异常（PAY_SMS）可能只是本人有出入，也可能是冒用：
 // 验证 SMS 号对得上就放行；对不上就产生手机号不符，询问后可以拘留。
 const PAY_FLAWS = ['no_pay', 'pay_region', 'pay_phone', 'bill_kyc', 'vcard'];
-const KYC_FLAWS = ['no_kyc', 'kyc_exp', 'minor', 'kyc_region'];
+// KYC 证明的问题：没带、记录过期、未满 13 岁、出生地与住址不符（隐藏规则视为伪造证件）
+const KYC_FLAWS = ['no_kyc', 'kyc_exp', 'minor', 'kyc_forged'];
 const KYC_YEARS = 3, MIN_AGE = 13;
 // 付款账户印成「发卡方 ·尾号」：虚拟卡的发卡方后面会印「（虚拟）」，其余都是正常的银行卡
 const BANK_ISSUERS = ['NORTHSTAR BANK', 'CITADEL CARD', 'HARBOR TRUST', 'SUMMIT BANK', 'UNION CREDIT', 'CROWN BANK'];
@@ -228,7 +231,7 @@ const RULES = [
   { key: 'docs', head: '每个请求需出示凭证' },
   { key: 'personal', head: '个人账户需出示浏览器令牌' },
   { key: 'region', head: '凭证地区须为支持地区' },
-  { key: 'locale', head: '语言和时区须与地区一致' },
+  { key: 'locale', head: '语言和时区须与地区一致', hidden: true },
   { key: 'isp', head: '浏览器令牌运营商须与凭证地区一致', hidden: true },
   { key: 'date', head: '所有证件须为当前有效' },
   { key: 'issued', head: '证件签发日期不得晚于系统日期', hidden: true },
@@ -253,15 +256,18 @@ const RULES_2 = RULES.flatMap((r) => {
   return [r];
 });
 // 无尽模式难度 3：每个请求再加 KYC 证明（年满 13 岁、三年内更新过），个人付费套餐与 API 调用加支付凭证（企业账户不需要）
+// 条例顺序：付款账户 / 年满 13 岁 / 个人付费套餐排在「不得运行爬虫…」之后、「API 调用…」之前
 const RULES_3 = RULES_2.flatMap((r) => {
   if (r.key === 'docs') return [{ ...r, head: '每个请求需出示凭证和 KYC 证明' }];
-  if (r.key === 'personal') return [r,
-    { key: 'pay', head: '个人付费套餐与 API 调用需出示支付凭证' },
-    { key: 'billing', head: '支付凭证须与凭证及 KYC 证明一致' },
-    { key: 'vcard', head: '付款账户不得为虚拟支付卡' }];
   if (r.key === 'date') return [r,
     { key: 'kyc_date', head: 'KYC 记录须在三年内更新', hidden: true },
-    { key: 'age', head: '用户须年满 13 岁' }];
+    { key: 'kyc_forged', head: 'KYC 出生地与住址不符视为伪造证件', hidden: true }];
+  if (r.key === 'crawler') return [r,
+    { key: 'vcard', head: '付款账户不得为虚拟支付卡' },
+    { key: 'age', head: '用户须年满 13 岁' },
+    { key: 'pay', head: '个人付费套餐与 API 调用需出示支付凭证' },
+    { key: 'billing', head: '支付凭证须与凭证及 KYC 证明一致', hidden: true }];
+  if (r.key === 'sms') return [{ ...r, head: '头像 / 昵称 / 设备 / 企业账号 / KYC 住址与账单地址不符时可验证 SMS' }];
   return [r];
 });
 
@@ -425,7 +431,8 @@ const QUESTIONS = {
   no_pay: '付费套餐和 API 调用需要出示支付凭证。', pay_region: '你的账单地址不在凭证地区。', pay_phone: '支付凭证上的手机号不是你凭证地区的号码。',
   bill_kyc: '你的账单地址和 KYC 住址不一致。', vcard: '你的付款账户是虚拟支付卡。',
   no_kyc: '你没有出示 KYC 证明。', kyc_exp: '你的 KYC 已经超过三年没有更新。', minor: '你还没有满 13 岁。',
-  kyc_region: '你的 KYC 地区与凭证地区不一致。',
+  kyc_forged: '你的 KYC 出生地和住址对不上（伪造证件）。',
+  kyc_region: '你的 KYC 出生地和凭证地区不一致。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -461,7 +468,8 @@ const EXCUSES = {
   no_kyc: ['我不知道要这个。', '认证还在审核中。', '以前不需要这个。'],
   kyc_exp: ['我不知道要更新。', '正在重新认证。', '就差几天而已。'],
   minor: ['我已经成年了。', '生日填错了。', '……这是我哥哥的账号。'],
-  kyc_region: ['我最近移民了。', '认证是在国外做的。', '……地区选错了吧。'],
+  kyc_forged: ['出生地是后来补的。', '可能是系统拼错了。', '……我记不清了。'],
+  kyc_region: ['我是在国外出生的。', '后来才移民过来的。', '出生地一直没改。'],
 };
 
 // ———————————————— 生成请求 ————————————————
@@ -549,7 +557,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const region = corp
     ? (altRegions.length ? pick(altRegions) : corp.region)
     : flaw === 'region'
-      ? pick(Object.keys(REGION_LOCALE).filter((r) => !rs.regions.includes(r)))
+      ? pick(Object.keys(REGION_LOCALE).filter((r) => !rs.regions.includes(r) && (!rs.kyc || r !== '朝鲜')))
       : rs.voucher
         ? (foreign ? pick(foreignRegions) : pick(homeRegions))
         : pick(rs.regions);
@@ -602,7 +610,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const recs = [latest];
     for (let n = rint(0, 2); n > 0; n--) recs.push(addDays(recs[recs.length - 1], -rint(300, 1000)));
     kycDoc = {
-      姓名: pick(REAL_NAMES), 地区: region, 住址: home, 出生日期: fmtDate(birth), 记录: recs.map(fmtDate),
+      姓名: pick(REAL_NAMES), 出生地: region, 住址: home, 出生日期: fmtDate(birth), 记录: recs.map(fmtDate),
       look: [rint(0, 3), rint(0, 3), rint(0, 3)],   // 装饰人像的发色 / 肤色 / 衣服
       sig: rs.sig ? genuine('kyc') : null,          // 第三方「人格有限公司」的核验签名
     };
@@ -794,13 +802,14 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     issue([['kyc.出生日期', 'sys.日期'], ['kyc.出生日期', 'notice.date'], ['kyc.出生日期', 'rule.age']], '未满 13 岁',
       `出生日期 ${docs.kyc.出生日期}   系统日期 ${fmtDate(today)}`);
     spec.reason = `用户出生于 ${docs.kyc.出生日期}，未满 ${MIN_AGE} 岁`;
-  } else if (flaw === 'kyc_region') {
-    // KYC 地区印成另一个支持地区；住址仍在凭证地区（所以住址和 KYC 自己的地区也对不上）
-    docs.kyc.地区 = pick(rs.regions.filter((r) => r !== region));
-    const pairs = [['kyc.地区', 'cred.地区'], ['kyc.地区', 'kyc.住址']];
-    if (docs.pay) pairs.push(['pay.手机号', 'kyc.地区']);
-    issue(pairs, 'KYC 地区不符', `凭证地区：${cred.地区}   KYC 地区：${docs.kyc.地区}`);
-    spec.reason = `KYC 地区（${docs.kyc.地区}）与凭证地区（${cred.地区}）不符`;
+  } else if (flaw === 'kyc_forged') {
+    // 出生地与住址必须在同一个地区；对不上就是伪造的 KYC 证明（住址仍在凭证地区）。
+    // 出生地可以是不支持的地区（不使用朝鲜），但不与账单地址比对。
+    docs.kyc.出生地 = pick(KYC_REGIONS.filter((r) => r !== region));
+    const pairs = [['kyc.出生地', 'kyc.住址'], ['kyc.出生地', 'cred.地区']];
+    issue(pairs, 'KYC 出生地与住址不符（伪造证件）',
+      `出生地：${docs.kyc.出生地}   住址：${docs.kyc.住址}   凭证地区：${cred.地区}`, 'kyc_forged');
+    spec.reason = `KYC 出生地（${docs.kyc.出生地}）与住址（${docs.kyc.住址}）不符（伪造证件）`;
   } else if (flaw === 'no_pay') {
     docs.pay = null;
     const why = kind === 'api' ? 'API 调用' : `${plan} 套餐`;
@@ -814,22 +823,24 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       `凭证地区：${cred.地区}   账单地址：${docs.pay.账单地址}`, 'pay_region');
     if (flaw === 'pay_region') spec.reason = `账单地址（${docs.pay.账单地址}）不在凭证地区（${cred.地区}）`;
   } else if (idf === 'pay_phone') {
-    // 手机号的国家码不是凭证地区的（美国、加拿大同为 +1，互相不算不符）；KYC 地区也一起比对
+    // 手机号的国家码不是凭证地区的（美国、加拿大同为 +1，互相不算不符）；
+    // KYC 证明只登记出生地，不登记现居地区，不参与手机号核对
     docs.pay.手机号 = phoneNum(pick(Object.keys(PHONE_CC).filter((r) => PHONE_CC[r] !== PHONE_CC[region])));
     const pairs = [['pay.手机号', 'cred.地区'], ['pay.手机号', 'rule.region'], ['pay.手机号', 'rule.billing']];
-    if (docs.kyc) pairs.push(['pay.手机号', 'kyc.地区']);
     issue(pairs, '手机号与地区不符',
       `凭证地区：${cred.地区}   手机号：${docs.pay.手机号}`, 'pay_phone');
     if (flaw === 'pay_phone') spec.reason = `支付凭证的手机号（${docs.pay.手机号}）不是凭证地区（${cred.地区}）的号码`;
   } else if (idf === 'bill_kyc') {
-    // 账单地址还在凭证地区，只是和 KYC 住址差一点：有时只差门牌号
-    let addr;
-    do {
-      addr = Math.random() < 0.4 ? home.replace(/\d+ 号$/, `${rint(1, 999)} 号`) : addressIn(region);
-    } while (addr === home);
-    docs.pay.账单地址 = addr;
-    issue([['pay.账单地址', 'kyc.住址']], '账单地址与 KYC 不符', `账单地址：${addr}   KYC 住址：${home}`, 'bill_kyc');
-    if (flaw === 'bill_kyc') spec.reason = '支付凭证的账单地址与 KYC 住址不符';
+    // KYC 住址在别的地区（出生地同地区，可以是不支持地区）；账单地址仍在凭证地区。
+    // 出生地不与账单地址比对；出生地对凭证地区、KYC 住址对账单地址，两处不符都先验证 SMS。
+    const kr = pick(KYC_REGIONS.filter((r) => r !== region));
+    docs.kyc.出生地 = kr;
+    docs.kyc.住址 = addressIn(kr);
+    issue([['pay.账单地址', 'kyc.住址']], '账单地址与 KYC 住址不符',
+      `账单地址：${docs.pay.账单地址}   KYC 住址：${docs.kyc.住址}`, 'bill_kyc');
+    issue([['kyc.出生地', 'cred.地区']], 'KYC 出生地与凭证地区不符',
+      `出生地：${kr}   凭证地区：${cred.地区}`, 'kyc_region');
+    if (flaw === 'bill_kyc') spec.reason = `支付凭证的账单地址与 KYC 住址（${docs.kyc.住址}）不符`;
   } else if (flaw === 'vcard') {
     docs.pay.付款账户 = `${pick(VCARD_ISSUERS)}（虚拟） ·${digits(4)}`;
     issue([['pay.付款账户', 'rule.vcard']], '虚拟支付卡', `付款账户：${docs.pay.付款账户}`);
@@ -953,11 +964,13 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     pair('pay.手机号', 'rule.billing');
     pair('pay.IP', 'rule.billing');
     pair('pay.付款账户', 'rule.vcard');
-    if (docs.kyc) { pair('pay.账单地址', 'kyc.住址'); pair('pay.手机号', 'kyc.地区'); }
+    if (docs.kyc) { pair('pay.账单地址', 'kyc.住址'); }
   }
   if (docs.kyc) {
-    if (docs.cred) { pair('kyc.地区', 'cred.地区'); pair('kyc.住址', 'cred.地区'); }
-    pair('kyc.地区', 'kyc.住址');
+    // 出生地必须和 KYC 住址在同一个地区；对不上就是伪造证件。
+    // 出生地可以对凭证地区（不符时先验证 SMS）；KYC 住址可以是不支持地区，改由「KYC 住址 ↔ 账单地址」核对。
+    pair('kyc.出生地', 'kyc.住址');
+    pair('kyc.出生地', 'cred.地区');
     // KYC 记录的有效期印在证明上（「KYC 记录三年内有效」），手册的对应条例隐藏起来
     for (const k of ['出生日期', '记录']) {
       pair(`kyc.${k}`, 'sys.日期');

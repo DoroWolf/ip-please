@@ -79,13 +79,13 @@ const STORY = [
     tokRows: ['IP', '运营商', '签发', '有效期'],
     credRows: ['IP', '昵称', '地区', '有效期'], sig: true, flaws: ['region', 'brw', 'ip', 'no_tok'], legit: 0,
     wanted: false, redTeam: false, redGuards: true, inspect: true, voucher: false, foreign: 0,
-    notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器浏览器令牌”。\n\n请求券不再有效。',
+    notice: '现已制定更严格的资质审查要求。\n\n所有请求必须初始有效的“浏览器令牌”。\n\n请求券不再有效。',
     pages: [
       { body: '详细检查所有信息\n\n拒绝任何所持证件不符要求的请求。\n\n参考“历史记录”，用以关联用户的陈述。' },
     ],
     news: {
       h1: '请求券作废',
-      sub: '安全部：请求券作废，改用浏览器浏览器令牌；浏览器令牌登记 IP、运营商、签发日期、有效期与请求摘要',
+      sub: '安全部：请求券作废，改用浏览器令牌；浏览器令牌登记 IP、运营商、签发日期、有效期与请求摘要',
       h2: '发言人：要记的栏位越少，出错的地方就越少',
     },
   },

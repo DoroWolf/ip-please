@@ -149,8 +149,9 @@ class Doc {
   }
 }
 
-// KYC 证明（无尽模式难度 3）：仿照护照。上方左边是人像、右边是真实姓名 / 地区 / 住址 / 出生日期，
+// KYC 证明（无尽模式难度 3）：仿照护照。上方左边是人像、右边是真实姓名 / 出生地 / 住址 / 出生日期，
 // 下方是 KYC 更新记录（最新的在最上面），记录下方注明「KYC 记录三年内有效」，底部是第三方 KYC 服务商「人格有限公司」的核验签名（kyc.签名）。
+// 出生地可以与凭证地区不同（也可以是不支持的地区），不同时先验证 SMS；出生地不参与住址 / 手机号核对。
 // 人像和真实姓名只是装饰，不登记审查栏位；整块更新记录是一个栏位（kyc.记录）
 const KYC_PORTRAIT = [
   '......................', '.......HHHHHHHH.......', '......HHHHHHHHHH......', '.....HHHHHHHHHHHH.....',
@@ -170,7 +171,7 @@ class KycDoc {
     Object.assign(this, { key: 'kyc', title: DOC_NAMES.kyc, sub: DOC_SUBS.kyc, name: d.姓名, recs: d.记录, sig: d.sig, w: 184, vx: 54 });
     this.cols = { E: K.INK, M: rgb([150, 70, 70]) };
     ['H', 'S', 'C'].forEach((ch, i) => { this.cols[ch] = rgb(KYC_LOOKS[ch][d.look[i]]); });
-    this.rows = [['地区', d.地区], ['住址', d.住址, true], ['出生日期', d.出生日期]];
+    this.rows = [['出生地', d.出生地], ['住址', d.住址, true], ['出生日期', d.出生日期]];
     this.kx = Math.max(34, ...this.rows.map(([k]) => tw(k, 8) + 8));
     const avail = this.w - this.vx - this.kx - 6;
     this.wraps = this.rows.map(([, v, multi]) => (multi ? wrapDoc(v, 10, avail) : null));
@@ -480,8 +481,7 @@ class OfficialNotice {
     this.pages = [];
 
     let [lines0, y] = flow([[`安索兹卡 ${date}`, K.DIM, 'ma'], ['安全部', K.TEXT, 'ma'], ['官方通告', K.CLAUDE_L, 'ma'], null,
-      ...(title ? [[title, K.WHITE], null] : []), ...para(body), null,
-      ['翻阅规则手册查看生效的策略。', K.CYAN], null, motto], TITLE_H + 7);
+      ...(title ? [[title, K.WHITE], null] : []), ...para(body), null, motto], TITLE_H + 7);
     // 第 1 页可审查的是公告日期：和任务栏右下角的系统日期是同一用法，框也只圈日期本身
     const lw = tw(`安索兹卡 ${date}`, 8);
     const left = Math.round((this.w - lw) / 2) + tw('安索兹卡 ', 8);
@@ -660,7 +660,7 @@ class NoticeWindow {
 }
 
 // 历史记录：当前这段对话（下一个请求进来时清空）。
-// 请求内容那一句是可审查栏位（hist.请求），可以和浏览器令牌上的请求摘要（tok.请求）
+// 请求内容那一句是可审查栏位（hist.请求），可以和浏览器令牌上的请求摘要（brw.请求）
 // 或 API 授权的用途核对；没有浏览器令牌时本人不会说明来意，也就没有这一句。
 class HistoryLog {
   constructor(chat) {

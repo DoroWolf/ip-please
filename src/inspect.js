@@ -32,10 +32,10 @@ function fieldBoxes() {
 
 function fieldAt(x, y) {
   const all = fieldBoxes();
+  // 任务栏（含日期框）画在所有桌面窗口之上：指针在任务栏上时，底下的窗口不能抢走点击
   if (inBox(x, y, SCREEN)) {
-    for (const w of shownWins().reverse()) {
-      if (inBox(x, y, winBox(w))) return all.find((fb) => fb.w === w && inBox(x, y, fb.box)) || null;
-    }
+    const w = topWinAt([x, y]);
+    if (w) return all.find((fb) => fb.w === w && inBox(x, y, fb.box)) || null;
   }
   return all.find((fb) => !fb.w && inBox(x, y, fb.box)) || null;
 }
