@@ -10,8 +10,8 @@ const GATEWAY_GUIDE_CRED = gatewayGuide('凭证');
 const GATEWAY_GUIDE_DOCS = gatewayGuide('证件');
 
 const STORY = [
-  // 凭证从第一天起就带安全部会话中心的数字签名，通告第 1 页也印同一组签名；
-  // 但签名详情页（seals）与「签名造假」的题（flaws 里的 'sig'）留到之后的日子
+  // 凭证从第一天起就带安全部会话中心的图案签名，通告第 1 页也印同一枚图案；
+  // 但签名详情页（seals）与「图案签名造假」的题（flaws 里的 'sig'）留到之后的日子
   {
     rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'region', head: '仅限美国和英国地区访问' }],
     continents: [['北美洲', ['美国']], ['欧洲', ['英国']]], seals: false, regions: ['美国', '美国', '英国'], brw: false, kinds: ['chat'],
@@ -71,7 +71,7 @@ const STORY = [
     },
   },
   // 第四天：请求券作废，改用安全部会话中心签发的「浏览器令牌」——登记 IP、运营商、签发日期、有效期与请求摘要，
-  // 没有语言、时区，也没有签名（凭证本身仍带签名）。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
+  // 没有语言、时区，也没有图案签名（凭证本身仍带图案签名）。条例加入「证件上的 IP 须与本人一致」；右侧岔路口的两位红队只是装饰
   {
     rules: [{ key: 'docs', head: '每个请求需出示凭证' }, { key: 'personal', head: '个人账户需出示浏览器令牌' }, { key: 'region', head: '凭证地区须为支持地区' },
       { key: 'date', head: '所有证件须为当前有效' }, { key: 'match', head: '证件上的 IP 须与本人一致' }],

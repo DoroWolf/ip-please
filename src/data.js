@@ -1,5 +1,5 @@
 'use strict';
-// 规则与请求生成：地区、合法签名、规则手册的内容、随机请求（合规的，或者恰好有一处问题的）。
+// 规则与请求生成：地区、图案签名、规则手册的内容、随机请求（合规的，或者恰好有一处问题的）。
 // 故事模式的逐日剧情、上岗通告与报纸在 story.js。
 //
 // 请求 spec：
@@ -19,7 +19,7 @@
 //   sms                    验证 SMS 的资料：phone 身份记录上的号码 / reply 对方报出的号码 / names 曾用名 /
 //                          ok 核验是否通过（号码一致，且昵称 / 企业账号在曾用名里）；核验通过的异常放行也算正确
 // 栏位 key：证件 'cred.IP' / 'brw.运营商' / 'brw.语言' / 'brw.时区' / 'brw.签发' / 'brw.有效期' / 'brw.请求'（浏览器令牌上的请求摘要） /
-//          'cred.签名' / 'api.签名' / 'kyc.签名'，环境信息卡 'env.时区' / 'env.常用设备' / 'env.平均流量'，企业授权 'ent.企业' / 'ent.账号' / 'ent.IP' / 'ent.授权企业'，
+//          'cred.签名' / 'api.签名' / 'kyc.签名'（图案签名），环境信息卡 'env.时区' / 'env.常用设备' / 'env.平均流量'，企业授权 'ent.企业' / 'ent.账号' / 'ent.IP' / 'ent.授权企业'，
 //          手册 'rule.docs'（凭证）/ 'rule.personal'（个人账户的浏览器令牌和环境信息卡）/ 'rule.region' / 'rule.locale' / 'rule.ent' /
 //          'rule.crawler'（不得运行爬虫或自动化脚本，对照嗅探报告的后台进程）/
 //          'book.cred' / 'book.api' / 'book.kyc'（签名详情）/ 'book.ent'（企业名录），
@@ -67,9 +67,9 @@ const REGION_LOCALE = {
 // KYC 证明的出生地 / 住址不使用朝鲜（证件内容限制）
 const KYC_REGIONS = Object.keys(REGION_LOCALE).filter((r) => r !== '朝鲜');
 
-// —— 数字签名：签名跟着签发机构走 ——
-// 凭证原本由安索兹卡身份局签发，现在改用安全部会话中心（原浏览器令牌）的签名；浏览器令牌没有签名；API 授权仍由安全部接口管理处签发；
-// KYC 证明由第三方「人格有限公司」核验签发；难度 4 的身份信息卡和凭证一样由安全部会话中心签名（同一枚签名，见 sealKey）
+// —— 图案签名：证件底部印签发机构的图案印章，图案与签发机构须与手册「签名详情」页一致 ——
+// 凭证由安全部会话中心签发；浏览器令牌没有图案签名；API 授权由安全部接口管理处签发；
+// KYC 证明由第三方「人格有限公司」核验签发；难度 4 的身份信息卡和凭证共用同一枚图案（见 sealKey）
 const SEAL_GLYPHS = {
   cred: ['XXXXXXX', '.X...X.', '..X.X..', '...X...', '..X.X..', '.X...X.', 'XXXXXXX'],
   api: ['XX...XX', 'X.....X', '..XXX..', '..X.X..', '..XXX..', 'X.....X', 'XX...XX'],
@@ -77,18 +77,24 @@ const SEAL_GLYPHS = {
   // 伪造的图案：乍一看差不多
   cred_f: ['XXXXXXX', '.X...X.', '..XXX..', '...X...', '..XXX..', '.X...X.', 'XXXXXXX'],
   api_f: ['XX...XX', 'X.....X', '..XXX..', '..XXX..', '..XXX..', 'X.....X', 'XX...XX'],
-  kyc_f: ['..XXX..', '.X...X.', '.X...X.', 'XXXXXXX', '.X...X.', '..X.X..', '..XXX..'],
+  kyc_f: ['..XXX..', '..X.X..', '.X...X.', 'XXXXXXX', '.X...X.', '..X.X..', '..XXX..'],
 };
-const SIGNERS = {
-  cred: { issuer: '安全部会话中心', print: '7D13-0BE6', fakeIssuer: '安全部会话中台' },
-  api: { issuer: '安全部接口管理处', print: 'C5E8-3A72', fakeIssuer: '安全部接口管理局' },
-  kyc: { issuer: '人格有限公司', print: '2F9B-64D1', fakeIssuer: '人格服务有限公司' },
+const SEAL_ISSUERS = {
+  cred: '安全部会话中心',
+  api: '安全部接口管理处',
+  kyc: '人格有限公司',
 };
-// 证件用的是哪一组签名：身份信息卡借用凭证（安全部会话中心）的签名
+// 伪造的签发机构：乍一看差不多
+const FAKE_SEAL_ISSUERS = {
+  cred: '安全部会话中台',
+  api: '安全部接口管理局',
+  kyc: '人格服务有限公司',
+};
+// 证件用的是哪一枚图案：身份信息卡借用凭证（安全部会话中心）的图案
 const sealKey = (key) => (key === 'idc' ? 'cred' : key);
 const DOC_NAMES = { cred: '凭证', brw: '浏览器令牌', api: 'API 授权', voucher: '请求券', return: '临时返回页', env: '环境信息卡', ent: '企业授权',
   pay: '支付凭证', kyc: 'KYC 证明', idc: '身份信息卡' };
-// 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
+// 可以拘留的问题：伪造图案签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
 // 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、特别关注对象，以及浏览器令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符、
 // 凭证地区不在支持地区、未满 18 岁、付款账户是虚拟支付卡、流量异常且嗅探出特殊进程（traffic）。
 // 头像 / 昵称 / 企业授权的账号 / 使用设备这几种身份矛盾要先『验证 SMS』，不能直接拘留。
@@ -193,7 +199,7 @@ const NORMAL_PROCS = ['OneDrive（云盘同步）', 'Google Drive（云盘同步
 // 账单地址 / 手机号看起来不符时先验证 SMS，SMS 通过就正常放行；付款账户不得是虚拟支付卡。
 // 有效期与浏览器令牌一致，对照系统日期 / 通告日期查验。
 // KYC 证明：所有用户都要出示，仿照护照：上方是出生地、住址、出生日期（人像与真实姓名只是装饰），下方是 KYC 更新记录，
-// 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的核验签名。出生地与住址必须在同一地区（可以是不支持地区，但不使用朝鲜），
+// 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的图案签名。出生地与住址必须在同一地区（可以是不支持地区，但不使用朝鲜），
 // 对不上视为伪造证件；KYC 住址与账单地址不符时先验证 SMS；出生地不与账单地址比对。出生日期要年满 18 岁；最近一次 KYC 更新须在三年之内。
 // 支付凭证的账单地址 / 手机号异常（PAY_SMS）可能只是本人有出入，也可能是冒用：
 // 验证 SMS 号对得上就放行；对不上就产生手机号不符，询问后可以拘留。
@@ -216,21 +222,22 @@ const STREETS = ['中央大道', '河滨路', '枫树街', '港湾路', '公园�
 const REAL_NAMES = ['Emily Carter', 'James Wright', 'Sophie Martin', 'Lukas Weber', 'Haruto Sato', 'Mei Lin', 'Olivia Brown',
   'Noah Wilson', 'Chloe Dubois', 'Ben Fischer', 'Yui Tanaka', 'Ethan Clark', 'Grace Lee', 'Liam Murphy', 'Ava Thompson'];
 
-const genuine = (key) => ({ issuer: SIGNERS[key].issuer, print: SIGNERS[key].print, glyph: key });
+const genuine = (key) => ({ issuer: SEAL_ISSUERS[key], glyph: key });
 
-// 伪造签名：图案、机构、签名三者之一不对；返回 [签名, 说明, 哪一项不对]
+// 伪造图案签名：图案、签发机构两者之一不对，或缺少其中一项 / 两项都缺少
+// 返回 [签名, 说明, 哪一项不对]
 function forged(key) {
   const s = genuine(key);
-  const how = pick(['glyph', 'issuer', 'print']);
+  const how = pick(['glyph', 'issuer', 'no_glyph', 'no_issuer', 'none']);
   if (how === 'glyph') s.glyph = key + '_f';
-  if (how === 'issuer') s.issuer = SIGNERS[key].fakeIssuer;
-  if (how === 'print') {
-    const chars = [...s.print];
-    const i = pick([0, 1, 2, 3, 5, 6, 7, 8]);
-    chars[i] = pick([...'0123456789ABCDEF'].filter((c) => c !== chars[i]));
-    s.print = chars.join('');
-  }
-  return [s, { glyph: '签名图案与规则手册不符', issuer: '签发机构与规则手册不符', print: '签名与规则手册不符' }[how], how];
+  if (how === 'issuer') s.issuer = FAKE_SEAL_ISSUERS[key];
+  if (how === 'no_glyph' || how === 'none') s.glyph = null;
+  if (how === 'no_issuer' || how === 'none') s.issuer = null;
+  const sub = {
+    glyph: '图案签名与规则手册不符', issuer: '签发机构与规则手册不符',
+    no_glyph: '证件缺少图案签名', no_issuer: '证件缺少签发机构', none: '证件没有图案签名',
+  }[how];
+  return [s, sub, how];
 }
 
 // —— 规则手册 ——
@@ -246,7 +253,7 @@ const RULES = [
   { key: 'match', head: '证件上的 IP 须与本人一致', hidden: true },
   { key: 'api', head: 'API 调用必须出示 API 授权' },
   { key: 'scope', head: 'API 授权的用途须与请求一致', hidden: true },
-  { key: 'sig', head: '凭证、API 授权与 KYC 证明须有合法的数字签名', hidden: true },
+  { key: 'sig', head: '凭证、API 授权与 KYC 证明须有合法的图案签名', hidden: true },
   { key: 'wanted', head: '特别关注对象的请求须拒绝', hidden: true },
   { key: 'sms', head: '头像 / 昵称 / 企业账号不符时可验证 SMS', hidden: true },
 ];
@@ -278,14 +285,14 @@ const RULES_3 = RULES_2.flatMap((r) => {
   if (r.key === 'sms') return [{ ...r, head: '头像 / 昵称 / 设备 / 企业账号 / KYC 住址与账单地址不符时可验证 SMS' }];
   return [r];
 });
-// 无尽模式难度 4：浏览器令牌、环境信息卡和支付凭证合并成一张身份信息卡（由安全部会话中心签名）。
+// 无尽模式难度 4：浏览器令牌、环境信息卡和支付凭证合并成一张身份信息卡（底部是安全部会话中心的图案签名）。
 // 支付信息印在卡上：个人付费套餐与 API 调用的卡上要登记付款账户（free 套餐的对话请求印「无」）
 const RULES_4 = RULES_3.map((r) => {
   if (r.key === 'personal') return { ...r, head: '个人账户需出示身份信息卡' };
   if (r.key === 'isp') return { ...r, head: '身份信息卡运营商须与凭证地区一致' };
   if (r.key === 'pay') return { ...r, head: '个人付费套餐与 API 调用需登记支付信息' };
   if (r.key === 'billing') return { ...r, head: '身份信息卡的支付信息须与凭证及 KYC 证明一致' };
-  if (r.key === 'sig') return { ...r, head: '凭证、身份信息卡、API 授权与 KYC 证明须有合法的数字签名' };
+  if (r.key === 'sig') return { ...r, head: '凭证、身份信息卡、API 授权与 KYC 证明须有合法的图案签名' };
   return r;
 });
 
@@ -293,8 +300,8 @@ const RULES_4 = RULES_3.map((r) => {
 //   rules / continents   手册「基本条例」「支持地区」两页；seals = 手册有没有「签名详情」一页
 //   regions              合规请求的凭证地区（其余地区都算不支持）
 //   brw / kinds          要不要浏览器令牌；请求类型（'chat' / 'api'）
-//   tokRows             浏览器令牌上印哪些栏位（默认 IP、运营商、语言、时区、签发、有效期）；请求摘要固定印在签发上方；浏览器令牌没有数字签名
-//   credRows / sig       凭证上印哪些栏位；证件带不带数字签名
+//   tokRows             浏览器令牌上印哪些栏位（默认 IP、运营商、语言、时区、签发、有效期）；请求摘要固定印在签发上方；浏览器令牌没有图案签名
+//   credRows / sig       凭证上印哪些栏位；证件带不带图案签名
 //   flaws / legit        会出的问题（null = 全部）；本人换过头像 / 改过昵称 / 支付凭证地址手机号有出入的比例
 //   wanted               有没有特别关注对象
 //   redTeam / redGuards  redTeam：左上的红队 clawd（开放拘留）；redGuards：右侧岔路口的两位装饰
@@ -442,7 +449,7 @@ function nameVariant(s) {
 // 审查出矛盾后 Claude 追问的话，和对方的说辞
 const QUESTIONS = {
   region: '你的凭证地区不在支持范围内。', photo: '凭证上的头像不是你。', ip: '证件上的 IP 对不上。',
-  name: '证件上的昵称对不上。', brw: '你的证件已经过期了。', future: '这份证件的签发日期还没到。', sig: '这份证件的签名不合法。', no_api: 'API 调用需要出示 API 授权。',
+  name: '证件上的昵称对不上。', brw: '你的证件已经过期了。', future: '这份证件的签发日期还没到。', sig: '这份证件的图案签名不合法。', no_api: 'API 调用需要出示 API 授权。',
   no_cred: '你没有出示凭证。', no_tok: '你没有出示浏览器令牌。', no_voucher: '外国请求需要出示有效请求券。',
   scope: '授权的用途与请求不一致。', wanted: '你已被列为特别关注对象。',
   phone: '你的手机号和档案上的不一致。', oldname: '证件上的昵称或企业账号不在你的曾用名里。',
@@ -565,7 +572,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 难度 4 的环境信息卡并进了身份信息卡：缺卡改成「身份信息卡缺失」
   if (rs.env && ruleKeys.has('personal')) kinds.push(idc ? 'no_idc' : 'no_env', 'device', 'traffic');
   // 企业账户只出示凭证、企业授权和 KYC 证明：支付凭证由公司完成验证，不生成；
-  // 只出凭证本身（头像 / IP / 过期 / 签名）和企业授权上的问题。
+  // 只出凭证本身（头像 / IP / 过期 / 图案签名）和企业授权上的问题。
   // 昵称不符留给普通请求；企业授权的账号不符另算 ent_acct，同样可以验证 SMS（旧账号会留在档案的曾用名里）
   if (ent) {
     kinds = kinds.filter((k) => ['photo', 'ip', 'brw', 'sig'].includes(k))
@@ -670,11 +677,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     kycDoc = {
       姓名: pick(REAL_NAMES), 出生地: region, 住址: home, 出生日期: fmtDate(birth), 记录: recs.map(fmtDate),
       look: [rint(0, 3), rint(0, 3), rint(0, 3)],   // 装饰人像的发色 / 肤色 / 衣服
-      sig: rs.sig ? genuine('kyc') : null,          // 第三方「人格有限公司」的核验签名
+      sig: rs.sig ? genuine('kyc') : null,          // 第三方「人格有限公司」的图案签名
     };
   }
   if (needPay) payDoc = { IP: ip, 付款账户: `${pick(BANK_ISSUERS)} ·${digits(4)}`, 账单地址: home, 手机号: phoneNum(region), 有效期: validDate() };
-  // 难度 4 的身份信息卡：栏位取自 brw / env / pay，这里放安全部会话中心的签名和手机号。
+  // 难度 4 的身份信息卡：栏位取自 brw / env / pay，这里放安全部会话中心的图案签名和手机号。
   // 手机号与难度 3 不同：不需要支付信息的请求（free 套餐的对话）卡上也一定有号码，
   // 这个号码同时就是验证 SMS 时身份记录上的号码（见下面的 spec.sms）。
   const idcDoc = idc && brw ? { sig: rs.sig ? genuine('cred') : null, 手机号: payDoc ? payDoc.手机号 : phoneNum(region) } : null;
@@ -840,14 +847,16 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       `凭证地区：${cred.地区}   浏览器令牌运营商：${brw.运营商}`, 'isp');
     spec.reason = `浏览器令牌运营商与凭证地区不符`;
   } else if (flaw === 'sig') {
-    // 只有凭证、API 授权、KYC 证明和身份信息卡（难度 4）带签名：浏览器令牌没有签名，伪造签名不会落在浏览器令牌上
+    // 只有凭证、API 授权、KYC 证明和身份信息卡（难度 4）带图案签名：浏览器令牌没有签名，伪造签名不会落在浏览器令牌上
     const k = withDocs(['cred', 'api', 'kyc', 'idc']);
-    const [s, sub] = forged(sealKey(k));
+    const [s, sub, how] = forged(sealKey(k));
     docs[k].sig = s;
-    // 凭证的签发机构和签名也印在通告第 1 页底部（只是印着，审查签名要对规则手册的「签名详情」页）；
-    // 身份信息卡和凭证共用安全部会话中心的签名，对照手册上同一枚式样
-    issue([[`${k}.签名`, `book.${sealKey(k)}`]], '签名不合法', sub);
-    spec.reason = `${DOC_NAMES[k]}的数字签名不合法`;
+    // 缺少图案 / 缺少签发机构 / 图案或机构不符都算伪造文件（理由：伪造签名）；两项都缺少则是「缺少签名」。
+    // 凭证的签发机构与图案也印在通告第 1 页底部（只是印着，审查签名要对规则手册的「签名详情」页）；
+    // 身份信息卡和凭证共用安全部会话中心的图案，对照手册上同一枚式样
+    const missingAll = how === 'none';
+    issue([[`${k}.签名`, `book.${sealKey(k)}`]], missingAll ? '缺少签名' : '伪造签名', sub);
+    spec.reason = missingAll ? '缺少签名' : '伪造签名';
   } else if (flaw === 'no_api') {
     docs.api = null;
     issue([['rv.类型', 'rule.api']], '缺少证件', '请求类型：API 调用   未出示 API 授权');
@@ -1091,7 +1100,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     pair(`${k}.有效期`, 'notice.date');
     pair(`${k}.有效期`, 'rule.date');
     if (k === 'brw' && docs[k].签发 && hasIssuedRule) { pair('brw.签发', 'sys.日期'); pair('brw.签发', 'notice.date'); }
-    // 手册有「签名详情」页时，签名才有手册上的式样可审查（故事模式没有这一页，签名不参与审查）
+    // 手册有「签名详情」页时，图案签名才有手册上的式样可审查（故事模式没有这一页，签名不参与审查）
     if (docs[k].sig && rs.seals) pair(`${k}.签名`, `book.${k}`);
     pair(`${k}.IP`, 'rv.IP');
     if (k !== 'cred' && docs.cred) pair(`${k}.IP`, 'cred.IP');
@@ -1103,9 +1112,9 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     pair(`${k}.有效期`, 'notice.date');
     pair(`${k}.有效期`, 'rule.date');
   }
-  // KYC 证明的签名由第三方「人格有限公司」核验签发，对照手册「签名详情」页
+  // KYC 证明的图案签名由第三方「人格有限公司」核验签发，对照手册「签名详情」页
   if (docs.kyc && docs.kyc.sig && rs.seals) pair('kyc.签名', 'book.kyc');
-  // 身份信息卡的签名由安全部会话中心签发，和凭证对照同一枚式样
+  // 身份信息卡的图案签名由安全部会话中心签发，和凭证对照同一枚式样
   if (docs.idc && docs.idc.sig && rs.seals) pair('idc.签名', 'book.cred');
   if (docs.voucher) {
     pair('voucher.有效期', 'sys.日期');

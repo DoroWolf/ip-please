@@ -54,14 +54,15 @@ function drawStamp(x, y, kind) {
   txt(x + 22, y + 4, kind === 'approve' ? '放行' : '拒绝', 10, rgb(col), 'ma');
 }
 
-// 数字签名：图案 + 签发机构 + 签名（证件上和手册里画法一样，方便对照）
+// 图案签名：图案 + 签发机构（证件和手册上画法一样，方便对照；没有签名编号）。签发机构在图案右侧垂直居中
+function sealWidth(key) { return 27 + tw(SEAL_ISSUERS[sealKey(key)], 8); }
 function drawSeal(x, y, key, sig) {
-  const sc = SIGNER_COL[sealKey(key)];   // 身份信息卡借用凭证的签名式样
+  const k = sealKey(key);   // 身份信息卡借用凭证的图案签名
+  const sc = SIGNER_COL[k];
   const col = rgb(sc);
   frame(x, y, x + 19, y + 19, col, rgba(sc, 0.12));
-  pattern(SEAL_GLYPHS[sig.glyph], x + 3, y + 3, { X: col }, 2);
-  txt(x + 25, y + 1, sig.issuer, 8, K.TEXT);
-  txt(x + 25, y + 11, `签名 ${sig.print}`, 8, K.DIM);
+  if (sig.glyph) pattern(SEAL_GLYPHS[sig.glyph], x + 3, y + 3, { X: col }, 2);
+  if (sig.issuer) txt(x + 25, y + 6, sig.issuer, 8, K.TEXT);
 }
 
 // 证件栏位的折行：先按空格分词（避免把 TypeScript 拆成两半），单个词太长才逐字拆
@@ -82,7 +83,7 @@ function wrapDoc(s, size, width) {
   return lines;
 }
 
-// 证件：标题 + 若干行 label / value + 底部签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
+// 证件：标题 + 若干行 label / value + 底部的图案签名（sig = null 时没有签名，只留盖章的位置）；凭证左侧多一张头像
 // label 为空的行不登记审查栏位，只把 value 当作版面文字整行居中画出来（临时返回页）。
 // 行的第三项为 true 时，value 太长就折行印出来（浏览器令牌上的请求摘要）；整段仍算同一个审查栏位。
 // rows 里可以插 DOC_SEP：只画一条虚线，不算栏位、不登记审查范围（身份信息卡用它把栏位分类）。
@@ -98,7 +99,7 @@ class Doc {
     const top = TITLE_H + 4 + this.bannerH;
     // 栏位值从标签右边开始：标签较长（企业授权的「授权企业」）时整列往右让
     this.kx = Math.max(34, ...rows.map((r) => (!isDocSep(r) && r[0] ? tw(r[0], 8) + 8 : 0)));
-    // 折行的行先算好每行文字（10px），下面的行高、签名线和审查栏位都跟着变
+    // 折行的行先算好每行文字（10px），下面的行高、图案签名线和审查栏位都跟着变
     const avail = this.w - this.vx - this.kx - 6;
     this.wraps = rows.map((r) => (!isDocSep(r) && r[2] && r[1] ? wrapDoc(String(r[1]), 10, avail) : null));
     this.rowY = [];
@@ -107,7 +108,7 @@ class Doc {
       this.rowY.push(y);
       y += isDocSep(r) ? DOC_SEP_H : this.wraps[i] ? this.wraps[i].length * 11 + 2 : 12;
     });
-    // 没有签名、也不能盖章的证件（浏览器令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
+    // 没有图案签名、也不能盖章的证件（浏览器令牌 / 请求券）不留底部的签名 / 盖章区，窗口不用空一大块
     this.plain = !sig && key !== 'cred' && key !== 'return';
     this.sealY = Math.max(top + (photo ? 46 : 0), y) + 3;
     this.h = this.plain ? y + 5 : this.sealY + 24;
@@ -177,7 +178,7 @@ class Doc {
 }
 
 // KYC 证明（无尽模式难度 3）：仿照护照。上方左边是人像、右边是真实姓名 / 出生地 / 住址 / 出生日期，
-// 下方是 KYC 更新记录（最新的在最上面），记录下方注明「KYC 记录三年内有效」，底部是第三方 KYC 服务商「人格有限公司」的核验签名（kyc.签名）。
+// 下方是 KYC 更新记录（最新的在最上面），记录下方注明「KYC 记录三年内有效」，底部是第三方 KYC 服务商「人格有限公司」的图案签名（kyc.签名）。
 // 出生地可以与凭证地区不同（也可以是不支持的地区），不同时先验证 SMS；出生地不参与住址 / 手机号核对。
 // 人像和真实姓名只是装饰，不登记审查栏位；整块更新记录是一个栏位（kyc.记录）
 const KYC_PORTRAIT = [
@@ -214,7 +215,7 @@ class KycDoc {
     this.recY = Math.max(TITLE_H + 52, y + 3);
     const top = this.recY + 13;
     this.fields['kyc.记录'] = [3, top - 2, this.w - 4, top + this.recs.length * 12 - 1];
-    // 更新记录下面注明有效期，再下面是「人格有限公司」的核验签名：仿照护照的签发栏
+    // 更新记录下面注明有效期，再下面是「人格有限公司」的图案签名：仿照护照的签发栏
     this.noteY = top + this.recs.length * 12 + 4;
     this.sigY = this.noteY + 16;
     if (this.sig) this.fields['kyc.签名'] = [3, this.sigY - 2, this.w - 4, this.sigY + 21];
@@ -389,7 +390,7 @@ class Rulebook {
       entPage.fields['book.ent'] = [3, top - 4, this.w - 4, ey - 4];
     }
 
-    // —— 四、签名详情：凭证、API 授权和 KYC 证明带签名；浏览器令牌没有签名，所以不列 ——
+    // —— 四、签名详情：凭证、API 授权和 KYC 证明带图案签名；浏览器令牌没有签名，所以不列 ——
     // 没有企业名录（无尽模式难度 1）时，签名详情往前挪成第三章
     const CH_NO = '一二三四五六';
     const sealNo = CH_NO[rs.ent ? 3 : 2];
@@ -404,13 +405,12 @@ class Rulebook {
     newSealsPage();
     for (const key of ['cred', 'api', 'kyc'].filter((k) => k !== 'kyc' || rs.kyc)) {
       if (sy > sealsBody && !fits(sy, 35)) newSealsPage();
-      // 难度 4 的身份信息卡和凭证共用安全部会话中心的签名：同一枚式样，标题一起列出
+      // 难度 4 的身份信息卡和凭证共用安全部会话中心的图案：同一枚式样，标题一起列出
       const label = key === 'cred' && rs.idc ? `${DOC_NAMES.cred} / ${DOC_NAMES.idc}` : DOC_NAMES[key];
       seals.rows.push({ s: label, y: sy, col: K.CYAN }, { seal: key, y: sy + 10 });
       seals.fields['book.' + key] = [3, sy - 2, this.w - 4, sy + 30];
       sy += 35;
     }
-
     mid(owner, 52, '本手册所有权属于', 8, K.DIM);
     mid(owner, 65, '安全部', 10, K.TEXT);
     mid(owner, 100, '安全属于安索兹卡', 8, K.CLAUDE_L);
@@ -488,7 +488,7 @@ class Rulebook {
   }
 }
 
-// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文（sig：底部印凭证签名）；
+// 安全部官方通告（每次上岗时弹出）：第 1 页通告正文（底部印安全部会话中心的图案签名）；
 // 之后依次是附页 pages（{head, body, sample}）、特别关注对象的头像（wanted 非空时）、当天的报纸（news）
 const PAPER = 'rgb(224,214,192)', PAPER_INK = 'rgb(40,34,30)', PAPER_FAINT = 'rgb(176,164,144)', PAPER_TEXT = 'rgb(74,56,48)';
 class OfficialNotice {
@@ -515,12 +515,11 @@ class OfficialNotice {
     const lw = tw(`安索兹卡 ${date}`, 8);
     const left = Math.round((this.w - lw) / 2) + tw('安索兹卡 ', 8);
     const f0 = { 'notice.date': [left - 2, TITLE_H + 4, left + tw(date, 8) + 2, TITLE_H + 18] };
+    // 底部：安全部会话中心（凭证签发机构）的图案签名（只印，不作为审查栏位）
     if (sig) {
-      // 底部：安全部会话中心（凭证签发机构）的有效签名（只印，不作为审查栏位）
       y += 4;
-      lines0.push({ s: `${SIGNERS.cred.issuer}`, col: K.DIM, anchor: 'ma', y, rule: true },
-        { s: SIGNERS.cred.print, col: K.AMBER, anchor: 'ma', y: y + 11 });
-      y += 15;
+      lines0.push({ seal: 'cred', sig: genuine('cred'), x: Math.round((this.w - sealWidth('cred')) / 2), y, rule: true });
+      y += 22;
     }
     this.pages.push({ lines: lines0, fields: f0, h: y + 11 });
 
@@ -573,6 +572,7 @@ class OfficialNotice {
     const pg = this.pages[this.page];
     for (const l of pg.lines) {
       if (l.rule) rect(x + 10, y + l.y - 5, x + this.w - 11, y + l.y - 5, K.GRID);
+      if (l.seal) { drawSeal(x + l.x, y + l.y, l.seal, l.sig); continue; }
       txt(l.x !== undefined ? x + l.x : l.anchor === 'ma' ? x + this.w / 2 : x + 10, y + l.y, l.s, 8, l.col, l.anchor);
     }
     if (pg.sample) this.drawSample(x, y + pg.sample.y, pg.sample.row);
