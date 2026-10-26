@@ -77,7 +77,7 @@ const SEAL_GLYPHS = {
   // 伪造的图案：乍一看差不多
   cred_f: ['XXXXXXX', '.X...X.', '..XXX..', '...X...', '..XXX..', '.X...X.', 'XXXXXXX'],
   api_f: ['XX...XX', 'X.....X', '..XXX..', '..XXX..', '..XXX..', 'X.....X', 'XX...XX'],
-  kyc_f: ['..XXX..', '..X.X..', '.X...X.', 'XXXXXXX', '.X...X.', '..X.X..', '..XXX..'],
+  kyc_f: ['...X...', '..X.X..', '.X...X.', 'XXXXXXX', '.X...X.', '..X.X..', '...X...'],
 };
 const SEAL_ISSUERS = {
   cred: '安全部会话中心',
