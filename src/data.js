@@ -88,7 +88,7 @@ const DOC_NAMES = { cred: '凭证', brw: '浏览器令牌', api: 'API 授权', v
   pay: '支付凭证', kyc: 'KYC 证明', idc: '身份信息卡' };
 // 可以拘留的问题：伪造签名、伪造签发日期（签发日期晚于当前日期）、伪造企业授权（假图标 / 假企业名称）、
 // 身份矛盾（头像 / IP / 昵称 / 企业授权的账号 / 使用设备）、特别关注对象，以及浏览器令牌的语言 / 运营商、环境信息卡的时区与凭证地区不符、
-// 凭证地区不在支持地区、未满 13 岁、付款账户是虚拟支付卡、流量异常且嗅探出特殊进程（traffic）。
+// 凭证地区不在支持地区、未满 18 岁、付款账户是虚拟支付卡、流量异常且嗅探出特殊进程（traffic）。
 // 头像 / 昵称 / 企业授权的账号 / 使用设备这几种身份矛盾要先『验证 SMS』，不能直接拘留。
 // 支付凭证的账单地址 / 手机号异常、KYC 住址与账单地址不符也要先验证 SMS：号对得上就放行，对不上就产生手机号不符，询问后可以拘留。
 const SUSPEND_FLAWS = ['sig', 'future', 'photo', 'ip', 'name', 'wanted', 'locale', 'isp', 'ent_acct', 'ent_fake', 'device', 'traffic',
@@ -192,13 +192,13 @@ const NORMAL_PROCS = ['OneDrive（云盘同步）', 'Google Drive（云盘同步
 // 有效期与浏览器令牌一致，对照系统日期 / 通告日期查验。
 // KYC 证明：所有用户都要出示，仿照护照：上方是出生地、住址、出生日期（人像与真实姓名只是装饰），下方是 KYC 更新记录，
 // 记录下方注明「KYC 记录三年内有效」，底部是第三方「人格有限公司」的核验签名。出生地与住址必须在同一地区（可以是不支持地区，但不使用朝鲜），
-// 对不上视为伪造证件；KYC 住址与账单地址不符时先验证 SMS；出生地不与账单地址比对。出生日期要年满 13 岁；最近一次 KYC 更新须在三年之内。
+// 对不上视为伪造证件；KYC 住址与账单地址不符时先验证 SMS；出生地不与账单地址比对。出生日期要年满 18 岁；最近一次 KYC 更新须在三年之内。
 // 支付凭证的账单地址 / 手机号异常（PAY_SMS）可能只是本人有出入，也可能是冒用：
 // 验证 SMS 号对得上就放行；对不上就产生手机号不符，询问后可以拘留。
 const PAY_FLAWS = ['no_pay', 'pay_region', 'pay_phone', 'bill_kyc', 'vcard'];
-// KYC 证明的问题：没带、记录过期、未满 13 岁、出生地与住址不符（隐藏规则视为伪造证件）
+// KYC 证明的问题：没带、记录过期、未满 18 岁、出生地与住址不符（隐藏规则视为伪造证件）
 const KYC_FLAWS = ['no_kyc', 'kyc_exp', 'minor', 'kyc_forged'];
-const KYC_YEARS = 3, MIN_AGE = 13;
+const KYC_YEARS = 3, MIN_AGE = 18;
 // 付款账户印成「发卡方 ·尾号」：虚拟卡的发卡方后面会印「（虚拟）」，其余都是正常的银行卡
 const BANK_ISSUERS = ['NORTHSTAR BANK', 'CITADEL CARD', 'HARBOR TRUST', 'SUMMIT BANK', 'UNION CREDIT', 'CROWN BANK'];
 const VCARD_ISSUERS = ['WYLDCARD', 'DEEPAY', 'NOBYPAY', 'ONEKEE', 'FOMOPAY'];
@@ -261,8 +261,8 @@ const RULES_2 = RULES.flatMap((r) => {
     { key: 'sniff', head: '请求流量异常时可请求嗅探', hidden: true }];
   return [r];
 });
-// 无尽模式难度 3：每个请求再加 KYC 证明（年满 13 岁、三年内更新过），个人付费套餐与 API 调用加支付凭证（企业账户不需要）
-// 条例顺序：付款账户 / 年满 13 岁 / 个人付费套餐排在「不得运行爬虫…」之后、「API 调用…」之前
+// 无尽模式难度 3：每个请求再加 KYC 证明（年满 18 岁、三年内更新过），个人付费套餐与 API 调用加支付凭证（企业账户不需要）
+// 条例顺序：付款账户 / 年满 18 岁 / 个人付费套餐排在「不得运行爬虫…」之后、「API 调用…」之前
 const RULES_3 = RULES_2.flatMap((r) => {
   if (r.key === 'docs') return [{ ...r, head: '每个请求需出示凭证和 KYC 证明' }];
   if (r.key === 'date') return [r,
@@ -270,7 +270,7 @@ const RULES_3 = RULES_2.flatMap((r) => {
     { key: 'kyc_forged', head: 'KYC 出生地与住址不符视为伪造证件', hidden: true }];
   if (r.key === 'crawler') return [r,
     { key: 'vcard', head: '付款账户不得为虚拟支付卡' },
-    { key: 'age', head: '用户须年满 13 岁' },
+    { key: 'age', head: '用户须年满 18 岁' },
     { key: 'pay', head: '个人付费套餐与 API 调用需出示支付凭证' },
     { key: 'billing', head: '支付凭证须与凭证及 KYC 证明一致', hidden: true }];
   if (r.key === 'sms') return [{ ...r, head: '头像 / 昵称 / 设备 / 企业账号 / KYC 住址与账单地址不符时可验证 SMS' }];
@@ -452,7 +452,7 @@ const QUESTIONS = {
   device: '你现在用的不是常用设备。', traffic: '你的请求流量比平时高太多了。', proc: '你的设备在后台跑着特殊进程。',
   no_pay: '付费套餐和 API 调用需要出示支付凭证。', pay_region: '你的账单地址不在凭证地区。', pay_phone: '支付凭证上的手机号不是你凭证地区的号码。',
   bill_kyc: '你的账单地址和 KYC 住址不一致。', vcard: '你的付款账户是虚拟支付卡。',
-  no_kyc: '你没有出示 KYC 证明。', kyc_exp: '你的 KYC 已经超过三年没有更新。', minor: '你还没有满 13 岁。',
+  no_kyc: '你没有出示 KYC 证明。', kyc_exp: '你的 KYC 已经超过三年没有更新。', minor: '你还没有满 18 岁。',
   kyc_forged: '你的 KYC 出生地和住址对不上（伪造证件）。',
   kyc_region: '你的 KYC 出生地和凭证地区不一致。',
   no_idc: '你没有出示身份信息卡。', no_payinfo: '付费套餐和 API 调用需要在身份信息卡上登记支付信息。',
@@ -653,11 +653,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   const home = addressIn(region);
   let kycDoc = null, payDoc = null;
   if (rs.kyc) {
-    // 出生日期：年满 13 岁才合规；有时候刚好卡在 13 岁生日前后，要仔细算
-    const age13 = addYears(today, -MIN_AGE);
+    // 出生日期：年满 18 岁才合规；有时候刚好卡在 18 岁生日前后，要仔细算
+    const age18 = addYears(today, -MIN_AGE);
     const birth = flaw === 'minor'
-      ? addDays(age13, Math.random() < 0.5 ? rint(1, 60) : rint(61, 900))
-      : Math.random() < 0.25 ? addDays(age13, -rint(0, 200)) : addDays(addYears(today, -rint(MIN_AGE + 1, 60)), -rint(0, 364));
+      ? addDays(age18, Math.random() < 0.5 ? rint(1, 60) : rint(61, 900))
+      : Math.random() < 0.25 ? addDays(age18, -rint(0, 200)) : addDays(addYears(today, -rint(MIN_AGE + 1, 60)), -rint(0, 364));
     // KYC 更新记录：最近一次在三年之内才有效（刚好三年整也算），同样常常卡在边界上
     const span = dayDiff(addYears(today, -KYC_YEARS), today);
     const latest = flaw === 'kyc_exp'
@@ -869,7 +869,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       `最近一次更新 ${k}   已超过 ${KYC_YEARS} 年`);
     spec.reason = `KYC 最近一次更新是 ${k}，已超过 ${KYC_YEARS} 年`;
   } else if (flaw === 'minor') {
-    issue([['kyc.出生日期', 'sys.日期'], ['kyc.出生日期', 'notice.date'], ['kyc.出生日期', 'rule.age']], '未满 13 岁',
+    issue([['kyc.出生日期', 'sys.日期'], ['kyc.出生日期', 'notice.date'], ['kyc.出生日期', 'rule.age']], '未满 18 岁',
       `出生日期 ${docs.kyc.出生日期}   系统日期 ${fmtDate(today)}`);
     spec.reason = `用户出生于 ${docs.kyc.出生日期}，未满 ${MIN_AGE} 岁`;
   } else if (flaw === 'kyc_forged') {
