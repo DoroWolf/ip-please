@@ -190,7 +190,7 @@ const fmtFlow = (v) => `${v} KB/s`;
 // 应当放行；认不得的奇怪名称就是特殊进程（自动化脚本 / 爬虫 / 刷量工具），可以拘留
 const FG_PROCS = ['Chrome', 'Safari', 'Firefox', 'Edge', 'Claude Desktop', 'Claude Code'];
 const SPECIAL_PROCS = [['autoclaw.exe', '自动化脚本'], ['scrapebot', '爬虫'], ['reqflood.sh', '刷量工具'], ['tokenfarm.exe', '刷量工具'], ['crawlr.py', '爬虫']];
-const NORMAL_PROCS = ['OneDrive（云盘同步）', 'Google Drive（云盘同步）', 'Zoom（视频通话）', 'Teams（视频通话）', '系统更新', '上传附件'];
+const NORMAL_PROCS = ['OneDrive', 'Google Drive', 'Zoom', 'Teams', '系统更新', '上传附件'];
 
 // —— 支付凭证与 KYC 证明（无尽模式难度 3） ——
 // 支付凭证：个人账户的非 free 套餐和 API 调用都要出示；企业账户由公司完成支付验证，不需要。
