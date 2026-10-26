@@ -47,6 +47,9 @@ function compareOutcome(e, keys) {
   const note = e && e.spec.notes && e.spec.notes.get(keys);
   if (note) return { ok: false, kind: 'ok', title: note.title, sub: note.sub };
   if (e && ((e.spec.checks && e.spec.checks.has(keys)) || e.spec.confirms.has(keys))) {
+    // SMS 表单报出的号码 / 证件昵称与企业授权账号和身份记录对得上：本人已确认，可以放行
+    const confirmed = e.spec.confirms.has(keys) && (keys.includes('smsf.手机') || keys.includes('sms.曾用名'));
+    if (confirmed) return { ok: false, kind: 'ok', title: '身份已确认', sub: '与身份记录一致，是本人' };
     return { ok: false, kind: 'ok', title: '无矛盾', sub: '这两项信息一致' };
   }
   return { ok: false, kind: 'none', title: '无关联', sub: '这两项信息之间没有可核对的关系' };

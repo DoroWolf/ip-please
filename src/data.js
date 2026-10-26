@@ -16,6 +16,8 @@
 //   checks                 这一单本来就该对得上的栏位组合（用来区分“无矛盾”和“无关联”）
 //   taskOnTok              请求摘要印在浏览器令牌上（true = 看得到摘要、本人也会说明来意）
 //   nameField              昵称 / 企业账号与本人不一致的栏位（'cred.昵称' / 'ent.账号'）：身份记录的曾用名按它核对
+//   sms                    验证 SMS 的资料：phone 身份记录上的号码 / reply 对方报出的号码 / names 曾用名 /
+//                          ok 核验是否通过（号码一致，且昵称 / 企业账号在曾用名里）；核验通过的异常放行也算正确
 // 栏位 key：证件 'cred.IP' / 'brw.运营商' / 'brw.语言' / 'brw.时区' / 'brw.签发' / 'brw.有效期' / 'brw.请求'（浏览器令牌上的请求摘要） /
 //          'cred.签名' / 'api.签名' / 'kyc.签名'，环境信息卡 'env.时区' / 'env.常用设备' / 'env.平均流量'，企业授权 'ent.企业' / 'ent.账号' / 'ent.IP' / 'ent.授权企业'，
 //          手册 'rule.docs'（凭证）/ 'rule.personal'（个人账户的浏览器令牌和环境信息卡）/ 'rule.region' / 'rule.locale' / 'rule.ent' /
@@ -453,9 +455,9 @@ const QUESTIONS = {
   no_pay: '付费套餐和 API 调用需要出示支付凭证。', pay_region: '你的账单地址不在凭证地区。', pay_phone: '支付凭证上的手机号不是你凭证地区的号码。',
   bill_kyc: '你的账单地址和 KYC 住址不一致。', vcard: '你的付款账户是虚拟支付卡。',
   no_kyc: '你没有出示 KYC 证明。', kyc_exp: '你的 KYC 已经超过三年没有更新。', minor: '你还没有满 18 岁。',
-  kyc_forged: '你的 KYC 出生地和住址对不上（伪造证件）。',
+  kyc_forged: '你的 KYC 出生地和住址对不上。',
   kyc_region: '你的 KYC 出生地和凭证地区不一致。',
-  no_idc: '你没有出示身份信息卡。', no_payinfo: '付费套餐和 API 调用需要在身份信息卡上登记支付信息。',
+  no_idc: '你没有出示身份信息卡。', no_payinfo: '身份信息卡上没有登记支付信息。',
 };
 const EXCUSES = {
   region: ['我只是想用一下。', '我朋友都能用。', '这里网络有问题吧？'],
@@ -691,7 +693,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
 
   if (flaw === 'region') {
     issue([['cred.地区', 'rule.region']], '地区不支持', `凭证地区：${cred.地区}`);
-    spec.reason = `凭证地区为${cred.地区}，不在支持地区`;
+    spec.reason = `凭证地区不在支持地区`;
   } else if (flaw === 'no_cred') {
     // 柜台上一张凭证都没有：拿柜台和条例「每个请求需出示凭证」审查
     docs.cred = null;
@@ -726,7 +728,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     // 授权企业一栏照常写着 Anthrotzka；不对照地区的话，这张授权本身是齐全的
     issue([['cred.地区', 'book.ent'], ['ent.企业', 'cred.地区']], '地区与企业不符',
       `凭证地区：${cred.地区}   ${corp.name}（企业名录）：${corp.region}`, 'ent_region');
-    spec.reason = `凭证地区（${cred.地区}）与企业授权签发企业（${corp.name}，${corp.region}）不符`;
+    spec.reason = `凭证地区与企业授权签发企业不符`;
   } else if (idf === 'ent_acct') {
     // 企业授权上的账号差一点：可能是本人的旧账号（合规，档案的曾用名里有它），也可能是冒用。
     // 拿凭证昵称或本人昵称审查都能查出来；和头像 / 昵称一样要先验证 SMS 才分得出来，不能直接拘留
@@ -739,11 +741,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const [banner, sub] = forgedCorp(corp);
     entDoc.banner = banner;
     issue([['ent.企业', 'book.ent']], '企业授权伪造', sub);
-    spec.reason = `企业授权是伪造的（${sub}）`;
+    spec.reason = `伪造的企业授权`;
   } else if (flaw === 'no_voucher') {
     // 凭证地区在支持地区内（非本国）才需要请求券；柜台上没有券也可以直接拿柜台和条例审查
     issue([['cred.地区', 'rule.voucher'], ['rv.柜台', 'rule.voucher']], '缺少请求券', `请求来自${cred.地区}，未出示请求券`);
-    spec.reason = `外国请求（${cred.地区}）未出示请求券`;
+    spec.reason = `外国请求未出示请求券`;
   } else if (idf === 'photo') {
     cred.photo = pick(pool.filter((a) => a !== avatar));
     issue([['cred.照片', 'rv.头像']], '头像不符', '凭证上的头像   VS   本人的头像', 'photo');
@@ -752,7 +754,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     // 本次请求用的不是常用设备：冒用者（flaw）或本人换了设备（合规），验证 SMS 才分得出来
     env.常用设备 = pick(DEVICES.filter((d) => d !== device));
     issue([['rv.设备', 'env.常用设备']], '设备不符', `使用设备 ${device}   VS   常用设备 ${env.常用设备}`, 'device');
-    spec.reason = '使用设备与常用设备不符（冒用）';
+    spec.reason = '使用设备与常用设备不符';
   } else if (tfx) {
     // 请求流量是平均流量的好几倍：请求嗅探看后台进程，特殊进程（flaw）可以拘留，正常进程（合规）应放行
     spec.flow = fmtFlow(avgFlow * rint(5, 12));
@@ -764,7 +766,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const pairs = [['sniff.后台进程', 'rule.crawler']];
     if (bad) issue(pairs, '发现特殊进程', `后台进程 ${bg}（${what}）`, 'proc');
     else pairs.forEach(([a, b]) => note(a, b, '无特殊进程', `后台进程 ${bg}，未运行爬虫或自动化脚本`));
-    spec.reason = `请求流量异常，后台开着特殊进程 ${bg}（${what}）`;
+    spec.reason = `设备后台使用特殊进程 ${bg}`;
   } else if (flaw === 'ip') {
     // 难度 4 的身份信息卡只印一个 IP（取自浏览器令牌），支付凭证的 IP 不单独改
     const k = withDocs(idc ? ['cred', 'brw', 'api', 'ent'] : ['cred', 'brw', 'api', 'ent', 'pay']);
@@ -801,7 +803,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     // 签发日期还在未来：证件不可能已经签发，按伪造证件处理
     brw.签发 = day(1, 30);
     issue([['brw.签发', 'sys.日期'], ['brw.签发', 'notice.date']], '签发日期未到', `浏览器令牌签发 ${brw.签发}   VS   系统日期 ${fmtDate(today)}`, 'future');
-    spec.reason = '浏览器令牌的签发日期晚于当前日期（伪造证件）';
+    spec.reason = '浏览器令牌的签发日期晚于当前日期';
   } else if (flaw === 'locale') {
     // 浏览器令牌上的语言 / 时区必须和凭证地区一致；只审查真的印出来的栏位（浏览器令牌目前只印语言，难度 2 的时区印在环境信息卡上）
     const langs = Object.values(REGION_LOCALE).map((v) => v[0]);
@@ -825,9 +827,9 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const title = which === 'both' ? '语言和时区与地区不符' : which === 'lang' ? '语言与地区不符' : '时区与地区不符';
     issue(pairs, title, sub);
     spec.reason = which === 'both'
-      ? `${tzDoc === 'brw' || idc ? '浏览器令牌的语言 / 时区' : '浏览器令牌语言与环境信息卡时区'}与凭证地区（${cred.地区}）不符`
-      : which === 'lang' ? `浏览器令牌语言（${brw.语言}）与凭证地区（${cred.地区}）不符`
-        : `${tzName}时区（${docs[tzDoc].时区}）与凭证地区（${cred.地区}）不符`;
+      ? `${tzDoc === 'brw' || idc ? '浏览器令牌的语言 / 时区' : '浏览器令牌语言与环境信息卡时区'}与凭证地区不符`
+      : which === 'lang' ? `浏览器令牌语言与凭证地区不符`
+        : `${tzName}时区与凭证地区不符`;
   } else if (flaw === 'isp') {
     // 浏览器令牌的运营商必须属于凭证地区：印上别处的运营商（主要城市不在凭证地区）
     const [name, city] = pick(ISPS.filter((x) => x[2] !== cred.地区));
@@ -836,7 +838,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     if (rs.rules.some((r) => r.key === 'isp')) pairs.push(['brw.运营商', 'rule.isp']);
     issue(pairs, '运营商与地区不符',
       `凭证地区：${cred.地区}   浏览器令牌运营商：${brw.运营商}`, 'isp');
-    spec.reason = `浏览器令牌运营商（${brw.运营商}）与凭证地区（${cred.地区}）不符`;
+    spec.reason = `浏览器令牌运营商与凭证地区不符`;
   } else if (flaw === 'sig') {
     // 只有凭证、API 授权、KYC 证明和身份信息卡（难度 4）带签名：浏览器令牌没有签名，伪造签名不会落在浏览器令牌上
     const k = withDocs(['cred', 'api', 'kyc', 'idc']);
@@ -845,7 +847,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     // 凭证的签发机构和签名也印在通告第 1 页底部（只是印着，审查签名要对规则手册的「签名详情」页）；
     // 身份信息卡和凭证共用安全部会话中心的签名，对照手册上同一枚式样
     issue([[`${k}.签名`, `book.${sealKey(k)}`]], '签名不合法', sub);
-    spec.reason = `${DOC_NAMES[k]}的数字签名不合法（${sub}）`;
+    spec.reason = `${DOC_NAMES[k]}的数字签名不合法`;
   } else if (flaw === 'no_api') {
     docs.api = null;
     issue([['rv.类型', 'rule.api']], '缺少证件', '请求类型：API 调用   未出示 API 授权');
@@ -853,11 +855,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   } else if (flaw === 'scope') {
     // 请求摘要印在浏览器令牌上；历史记录里的请求内容也可以拿来核对（有浏览器令牌，两者才都看得到）
     issue([['api.用途', 'brw.请求'], ['api.用途', 'hist.请求']], '用途不一致', `请求：${task}   VS   授权用途：${api.用途}`);
-    spec.reason = `API 授权用途（${api.用途}）与请求（${task}）不一致`;
+    spec.reason = `API 授权用途与请求不一致`;
   } else if (flaw === 'wanted') {
     const n = `notice.wanted${wi}`;
     issue([['rv.头像', n], ['cred.照片', n]], '特别关注对象', `本人头像与通告中的特别关注对象 ${WANTED_TAGS[wi]} 一致`);
-    spec.reason = `本人为特别关注对象 ${WANTED_TAGS[wi]}`;
+    spec.reason = `用户为特别关注对象 ${WANTED_TAGS[wi]}`;
   } else if (flaw === 'no_kyc') {
     // KYC 证明人人都要：和凭证缺失一样拿柜台对「每个请求需出示凭证和 KYC 证明」
     docs.kyc = null;
@@ -867,11 +869,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const k = docs.kyc.记录[0];
     issue([['kyc.记录', 'sys.日期'], ['kyc.记录', 'notice.date']], 'KYC 记录过期',
       `最近一次更新 ${k}   已超过 ${KYC_YEARS} 年`);
-    spec.reason = `KYC 最近一次更新是 ${k}，已超过 ${KYC_YEARS} 年`;
+    spec.reason = `KYC 最近更新已超过 ${KYC_YEARS} 年`;
   } else if (flaw === 'minor') {
     issue([['kyc.出生日期', 'sys.日期'], ['kyc.出生日期', 'notice.date'], ['kyc.出生日期', 'rule.age']], '未满 18 岁',
       `出生日期 ${docs.kyc.出生日期}   系统日期 ${fmtDate(today)}`);
-    spec.reason = `用户出生于 ${docs.kyc.出生日期}，未满 ${MIN_AGE} 岁`;
+    spec.reason = `用户未满 ${MIN_AGE} 岁`;
   } else if (flaw === 'kyc_forged') {
     // 出生地与住址必须在同一个地区；对不上就是伪造的 KYC 证明（住址仍在凭证地区）。
     // 出生地可以是不支持的地区（不使用朝鲜），但不与账单地址比对。
@@ -879,7 +881,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const pairs = [['kyc.出生地', 'kyc.住址'], ['kyc.出生地', 'cred.地区']];
     issue(pairs, 'KYC 出生地与住址不符（伪造证件）',
       `出生地：${docs.kyc.出生地}   住址：${docs.kyc.住址}   凭证地区：${cred.地区}`, 'kyc_forged');
-    spec.reason = `KYC 出生地（${docs.kyc.出生地}）与住址（${docs.kyc.住址}）不符（伪造证件）`;
+    spec.reason = `KYC 出生地与住址不符`;
   } else if (flaw === 'no_pay' && idc) {
     // 难度 4：身份信息卡照常出示，只是支付信息一栏印着「无」：拿卡上的付款账户对套餐 / 请求类型和条例
     docs.pay = null;
@@ -898,7 +900,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     docs.pay.账单地址 = addressIn(pick(Object.keys(REGION_CITIES).filter((r) => r !== region)));
     issue([['pay.账单地址', 'cred.地区'], ['pay.账单地址', 'kyc.住址'], ['pay.账单地址', 'rule.billing']], '账单地址与地区不符',
       `凭证地区：${cred.地区}   账单地址：${docs.pay.账单地址}`, 'pay_region');
-    if (flaw === 'pay_region') spec.reason = `账单地址（${docs.pay.账单地址}）不在凭证地区（${cred.地区}）`;
+    if (flaw === 'pay_region') spec.reason = `账单地址不在凭证地区`;
   } else if (idf === 'pay_phone') {
     // 手机号的国家码不是凭证地区的（美国、加拿大同为 +1，互相不算不符）；
     // KYC 证明只登记出生地，不登记现居地区，不参与手机号核对
@@ -906,7 +908,7 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
     const pairs = [['pay.手机号', 'cred.地区'], ['pay.手机号', 'rule.region'], ['pay.手机号', 'rule.billing']];
     issue(pairs, '手机号与地区不符',
       `凭证地区：${cred.地区}   手机号：${docs.pay.手机号}`, 'pay_phone');
-    if (flaw === 'pay_phone') spec.reason = `支付凭证的手机号（${docs.pay.手机号}）不是凭证地区（${cred.地区}）的号码`;
+    if (flaw === 'pay_phone') spec.reason = `支付凭证的手机号不是凭证地区的号码`;
   } else if (idf === 'bill_kyc') {
     // KYC 住址在别的地区（出生地同地区，可以是不支持地区）；账单地址仍在凭证地区。
     // 出生地不与账单地址比对；出生地对凭证地区、KYC 住址对账单地址，两处不符都先验证 SMS。
@@ -917,11 +919,11 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       `账单地址：${docs.pay.账单地址}   KYC 住址：${docs.kyc.住址}`, 'bill_kyc');
     issue([['kyc.出生地', 'cred.地区']], 'KYC 出生地与凭证地区不符',
       `出生地：${kr}   凭证地区：${cred.地区}`, 'kyc_region');
-    if (flaw === 'bill_kyc') spec.reason = `支付凭证的账单地址与 KYC 住址（${docs.kyc.住址}）不符`;
+    if (flaw === 'bill_kyc') spec.reason = `支付凭证的账单地址与 KYC 住址不符`;
   } else if (flaw === 'vcard') {
     docs.pay.付款账户 = `${pick(VCARD_ISSUERS)}（虚拟） ·${digits(4)}`;
     issue([['pay.付款账户', 'rule.vcard']], '虚拟支付卡', `付款账户：${docs.pay.付款账户}`);
-    spec.reason = `付款账户（${docs.pay.付款账户}）是虚拟支付卡`;
+    spec.reason = `付款账户是虚拟支付卡`;
   }
 
   // DeepThink 的授权企业一栏必定不含 Anthrotzka：授权本身无效（只能拒绝）。
@@ -960,16 +962,22 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
       const n0 = pick(others);
       names = [n0, pick(others.filter((n) => n !== n0))];
     }
-    spec.sms = { phone, reply: spec.legit ? phone : phoneVariant(phone), names, ip: cred.IP };
-    // 支付凭证上也登记着同一个手机号，对方填的号码同样可以拿来对
+    const reply = spec.legit ? phone : phoneVariant(phone);
+    // 核验通过（ok）：表单报出的号码与身份记录一致，昵称 / 企业账号也在曾用名里（没有可对的曾用名时只看号码）。
+    // 核验通过说明只是本人有出入（换过头像 / 改过昵称 / 地址手机号不同），放行同样算正确处理，见 station.js 的 judge
+    const ok = reply === phone && (!docName || names.includes(docName));
+    spec.sms = { phone, reply, names, ip: cred.IP, ok };
+    // 支付凭证 / 身份信息卡上也登记着同一个手机号，对方填的号码同样可以拿来对。
+    // 难度 4 的 free 套餐对话没有单独的支付凭证，但卡上一定印着手机号（见 idcDoc.手机号），一样可以对
+    const cardPhone = docs.idc ? 'idc.手机号' : docs.pay ? 'pay.手机号' : null;
     const phonePairs = [['smsf.手机', 'sms.手机']];
-    if (docs.pay) phonePairs.push(['smsf.手机', 'pay.手机号']);
-    if (spec.legit) phonePairs.forEach((p) => spec.confirms.add(p.sort().join('|')));
+    if (cardPhone) phonePairs.push(['smsf.手机', cardPhone]);
+    if (reply === phone) phonePairs.forEach((p) => spec.confirms.add(p.sort().join('|')));
     else issue(phonePairs, '手机号不符', `对方填写 ${spec.sms.reply}   VS   档案 ${phone}`, 'phone');
     if (spec.nameField) {
       const namePair = [spec.nameField, 'sms.曾用名'];
       const what = spec.nameField === 'ent.账号' ? '企业账号' : '证件昵称';
-      if (spec.legit) spec.confirms.add(namePair.sort().join('|'));
+      if (names.includes(docName)) spec.confirms.add(namePair.sort().join('|'));
       else issue([namePair], '不是曾用名', `${what}不在档案的曾用名中`, 'oldname');
     }
   }
@@ -977,7 +985,12 @@ function makeRequest(today, pBad = 0.45, wanted = [], rs = FULL_RULES) {
   // 审查：哪些栏位组合本来就有可核对的关系（和这一单有没有毛病无关）
   const pair = (a, b) => spec.checks.add([a, b].sort().join('|'));
   if (idf) pair('rv.昵称', 'sms.昵称');
-  if (idf && docs.pay) pair('sms.手机', 'pay.手机号');
+  // 身份记录上的手机号就是支付凭证 / 身份信息卡上登记的号码：两者一致只说明是同一个登记号码，不是核验结果
+  // （核验要拿表单上对方填的号码来对，见上面的 confirms / phone 异常），所以显示成说明而不是「无矛盾」
+  if (idf) {
+    const cardPhone = docs.idc ? 'idc.手机号' : docs.pay ? 'pay.手机号' : null;
+    if (cardPhone) note('sms.手机', cardPhone, '同一登记号码', '两者都是账户登记的号码，请拿表单上对方填的号码核对');
+  }
   if (spec.sniff) { pair('sniff.请求流量', 'rv.流量'); pair('sniff.请求流量', 'env.平均流量'); }
   // 使用设备 / 请求流量对照环境信息卡上的常用设备 / 平均流量
   if (docs.env) { pair('rv.设备', 'env.常用设备'); pair('rv.流量', 'env.平均流量'); }

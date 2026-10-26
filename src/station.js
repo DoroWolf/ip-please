@@ -350,9 +350,14 @@ const LEGIT_LINES = {
   bill_kyc: '账单地址与 KYC 住址有出入，可经 SMS 验证确认',
 };
 
+// 可经 SMS 核验的异常（data.js 的 SMS_ISSUES）：表单报出的号码与身份记录一致、昵称 / 企业账号也在曾用名里时，
+// 说明只是本人有出入（换过头像 / 改过昵称 / 换了设备 / 账单地址手机号不同），放行同样算正确处理。
+// 核验没通过（号码不符 / 不是曾用名）才按冒用处理：放行算事故，拒绝或拘留才对。
+const smsCleared = (e) => !!e && !!e.spec.flaw && !!e.spec.sms && !!e.spec.sms.ok && SMS_ISSUES.includes(e.spec.flaw);
+
 // 只要查出问题（spec.legit：头像 / 昵称 / 企业账号 / 使用设备 / 支付凭证地址手机号 / 流量异常），直接拒绝也是合规处置：
-// 按程序拒绝不算事故；验证 SMS / 请求嗅探只用来确认能不能放行。
-const denyLegit = (e, kind) => kind === 'deny' && !!e.spec.legit;
+// 按程序拒绝不算事故；验证 SMS / 请求嗅探只用来确认能不能放行。SMS 核验通过的异常同样可以按程序拒绝。
+const denyLegit = (e, kind) => kind === 'deny' && (!!e.spec.legit || smsCleared(e));
 
 function judge(e, kind) {
   const spec = e.spec;
@@ -360,12 +365,16 @@ function judge(e, kind) {
   const stamp = stampDocOf(e);
   const passOnTicket = kind === 'approve' && !!stamp && stamp.key === 'return';
   const proceduralDeny = denyLegit(e, kind);
+  // SMS 核验通过：这一单的异常只是本人有出入，跟合规请求一样可以放行（也不能当成拘留理由）
+  const cleared = smsCleared(e);
   // 拘留判定看这一单的主问题，也看同时存在的其他疑点（例如 DeepThink 的授权无效 + 地区不支持）；
-  // spec.legit 的合规疑点即使查出了矛盾，也不能当成拘留理由。
-  const suspendable = !spec.legit && (SUSPEND_FLAWS.includes(spec.flaw) || spec.issues.some((is) => SUSPEND_FLAWS.includes(is.type)));
-  // 主决定只看章是放行 / 拒绝 / 拘留；拒绝理由章是另外盖的附注，不参与这里
+  // spec.legit 的合规疑点、SMS 核验通过的异常，即使查出了矛盾，也不能当成拘留理由。
+  const suspendable = !spec.legit && !cleared
+    && (SUSPEND_FLAWS.includes(spec.flaw) || spec.issues.some((is) => SUSPEND_FLAWS.includes(is.type)));
+  // 主决定只看章是放行 / 拒绝 / 拘留；拒绝理由章是另外盖的附注，不参与这里。
+  // 放行算对的两种情况：本来就没问题（flaw === null），或者 SMS 核验通过、异常只是本人有出入（cleared）
   const decisionRight = proceduralDeny
-    || (kind === 'suspend' ? suspendable : !passOnTicket && (kind === 'approve') === (spec.flaw === null));
+    || (kind === 'suspend' ? suspendable : !passOnTicket && (kind === 'approve') === (spec.flaw === null || cleared));
   // 难度 3 起：拒绝要加盖拒绝理由章。拒绝本身没错、却没盖理由章，同样算事故（缺少拒绝理由）。
   // 只在最终决定是「拒绝」时检查：先盖理由、验证 SMS 后改放行，理由章不会把放行判成事故。
   const noReason = kind === 'deny' && decisionRight && !!rules().denyReason && !(stamp && stamp.reason);
@@ -397,9 +406,10 @@ function judge(e, kind) {
   const cite = citationLines(RUN.cites);
   const lines = noReason ? ['拒绝请求时未加盖拒绝理由：', '缺少拒绝理由'] : kind === 'approve'
     ? ['放行了违规请求：', passOnTicket ? '凭证缺失' : spec.reason]
-    : kind === 'suspend' && spec.flaw !== null
+    : kind === 'suspend' && spec.flaw !== null && !cleared
       ? ['拘留了不得拘留的请求：', spec.reason]
-      : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：', spec.legit ? LEGIT_LINES[spec.legit] : '证件齐全，信息一致'];
+      : [kind === 'suspend' ? '拘留了合规请求：' : '拒绝了合规请求：',
+        spec.legit ? LEGIT_LINES[spec.legit] : cleared ? LEGIT_LINES[spec.flaw] : '证件齐全，信息一致'];
   if (RUN.mode === 'timed') {
     D.timeAdj -= PENALTY_SEC;
     statTip('time', `-${PENALTY_SEC}s`, K.RED);
